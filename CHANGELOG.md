@@ -1,5 +1,11 @@
 # @requence/table
 
+## 1.0.1
+
+### Patch Changes
+
+- [`2896633`](https://github.com/requence/table/commit/289663366ef0bf8a24c192a763afd68c1104e3d1) Thanks [@Torsten85](https://github.com/Torsten85)! - Fix broken bundle output caused by Bun bundler barrel re-export bug
+
 ## 1.0.0
 
 ### Major Changes
