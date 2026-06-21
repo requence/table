@@ -5,6 +5,7 @@ import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
   vite: { plugins: [tailwindcss()] },
+  markdown: { gfm: true },
   integrations: [
     react(),
     starlight({
