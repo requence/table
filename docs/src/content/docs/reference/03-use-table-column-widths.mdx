@@ -1,0 +1,179 @@
+---
+title: useTableColumnWidths
+description: API reference for the useTableColumnWidths hook — persistent column width management for VirtualTable.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+`useTableColumnWidths` manages user-resized column widths and optionally persists them to `localStorage`. It returns a `register` function that produces the `width`, `resizable`, and `onResizeEnd` props expected by `VirtualTable.Column`.
+
+## Import
+
+```typescript
+import { useTableColumnWidths } from '@requence/table'
+```
+
+## Signature
+
+```typescript
+function useTableColumnWidths(options?: UseColumnWidthsOptions): {
+  register: (key: string, options?: RegisterOptions) => {
+    width: number | string | undefined
+    resizable: true
+    onResizeEnd: (width: number, startWidth: number, frValue: number) => void
+  }
+  reset: () => void
+}
+```
+
+## Options
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `persist` | `string` | — | When provided, column widths are persisted to `localStorage` under the key `columnWidths:{persist}`. Omit to keep widths in memory only (lost on unmount). |
+
+## Return Value
+
+| Property | Type | Description |
+|---|---|---|
+| `register` | `(key: string, options?: RegisterOptions) => ColumnProps` | Registers a column and returns props to spread onto `VirtualTable.Column`. See [register()](#register). |
+| `reset` | `() => void` | Resets all column widths to their defaults. If `persist` is set, the localStorage entry is also removed. |
+
+## register()
+
+Call `register` for each column, passing a unique key and optional configuration. The returned object is designed to be spread directly onto a `Column` component.
+
+```typescript
+const columnWidths = useTableColumnWidths({ persist: 'users-table' })
+
+// In JSX:
+<VirtualTable.Column {...columnWidths.register('name', { defaultValue: '2fr' })}>
+  Name
+</VirtualTable.Column>
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+|---|---|---|
+| `key` | `string` | **Required.** Unique identifier for this column. Used as the key in the persisted width map. |
+| `options` | `RegisterOptions` | Optional configuration for this column. |
+
+### RegisterOptions
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `defaultValue` | `number \| string` | — | Default width before any resize has occurred. A **number** is pixels, a **string** is a CSS grid value (e.g. `'1fr'`, `'2fr'`). If omitted, the column uses `VirtualTable.Column`'s own default (`'1fr'`). |
+| `relative` | `boolean` | `false` | When `true`, resized widths are stored as `fr` values (e.g. `'1.5fr'`) instead of pixel values. This keeps column proportions consistent across different viewport sizes. |
+
+### Return Value
+
+| Property | Type | Description |
+|---|---|---|
+| `width` | `number \| string \| undefined` | The current width for this column — either a previously saved value or the `defaultValue`. |
+| `resizable` | `true` | Always `true`. Enables the resize handle on the column. |
+| `onResizeEnd` | `(width: number, startWidth: number, frValue: number) => void` | Callback that stores the new width. When `relative` is `true`, stores `frValue` as a string like `'1.50fr'`. Otherwise stores the pixel `width` as a number. |
+
+## Pixel vs Fr Width Storage
+
+The `relative` option on `register` controls how resized widths are stored:
+
+- **`relative: false`** (default) — The final **pixel width** from the drag is stored as a number. The column will have a fixed pixel width after resize.
+
+- **`relative: true`** — The **`frValue`** from `onResizeEnd` is stored as a string like `'1.50fr'`. The column remains flexible and scales with the container. The `frValue` is rounded to 2 decimal places.
+
+## localStorage Key Format
+
+When `persist` is provided, widths are stored as a JSON object under:
+
+```
+columnWidths:{persist}
+```
+
+For example, with `persist: 'users-table'`, the localStorage key is `columnWidths:users-table` and the value looks like:
+
+```json
+{
+  "name": "2.00fr",
+  "email": 250,
+  "actions": "0.50fr"
+}
+```
+
+## Full Example
+
+```tsx
+import { VirtualTable, useTableCache, useTableColumnWidths } from '@requence/table'
+
+function UsersTable() {
+  const cache = useTableCache('users', {
+    pageSize: 50,
+    getItemId: (user) => user.id,
+    compare: (a, b) => a.name.localeCompare(b.name),
+    fetchItems: (offset, limit) => api.getUsers({ offset, limit }),
+  })
+
+  const columnWidths = useTableColumnWidths({ persist: 'users-table' })
+
+  return (
+    <VirtualTable
+      totalCount={cache.totalCount}
+      rowHeight={40}
+      onRangeChange={cache.handleRangeChange}
+    >
+      <VirtualTable.Header>
+        <VirtualTable.Column
+          {...columnWidths.register('name', { defaultValue: '2fr', relative: true })}
+        >
+          Name
+        </VirtualTable.Column>
+        <VirtualTable.Column
+          {...columnWidths.register('email', { defaultValue: '1fr', relative: true })}
+        >
+          Email
+        </VirtualTable.Column>
+        <VirtualTable.Column width={100} resizable={false}>
+          Actions
+        </VirtualTable.Column>
+      </VirtualTable.Header>
+
+      <VirtualTable.Body>
+        {(index) => {
+          const user = cache.getItem(index)
+          if (!user) return null
+          return (
+            <VirtualTable.Row>
+              <VirtualTable.Cell>{user.name}</VirtualTable.Cell>
+              <VirtualTable.Cell>{user.email}</VirtualTable.Cell>
+              <VirtualTable.Cell showOnHover>
+                <button>Edit</button>
+              </VirtualTable.Cell>
+            </VirtualTable.Row>
+          )
+        }}
+      </VirtualTable.Body>
+
+      <VirtualTable.SkeletonRow className="animate-pulse">
+        <VirtualTable.Cell colSpan={3}>Loading…</VirtualTable.Cell>
+      </VirtualTable.SkeletonRow>
+
+      <VirtualTable.Empty className="py-20 text-gray-400">
+        No users found.
+      </VirtualTable.Empty>
+
+      <VirtualTable.Footer>
+        {({ start, end }) => (
+          <div className="flex justify-between px-4 py-2 text-sm text-gray-500">
+            <span>Showing {start + 1}–{end} of {cache.totalCount}</span>
+            <button onClick={columnWidths.reset}>Reset columns</button>
+          </div>
+        )}
+      </VirtualTable.Footer>
+    </VirtualTable>
+  )
+}
+```
+
+<Aside type="tip">
+  Columns that should not be user-resizable (like an actions column with a fixed width) can skip `register` entirely and set `width` and `resizable={false}` directly.
+</Aside>

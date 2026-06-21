@@ -1,0 +1,146 @@
+---
+title: Column Widths
+description: How useTableColumnWidths persists user-resized column widths to localStorage and integrates with VirtualTable via the register() helper.
+---
+
+## The problem
+
+Users resize columns to fit their workflow. When they refresh the page or navigate away and come back, those widths are lost. Manually wiring up `onResizeEnd` callbacks, `localStorage` reads/writes, and default width fallbacks for every column is tedious and error-prone.
+
+## The solution
+
+`useTableColumnWidths` encapsulates all of this in a single hook:
+
+```ts
+import { useTableColumnWidths } from '@requence/table'
+
+const { register, reset } = useTableColumnWidths({
+  persist: 'my-user-table',
+})
+```
+
+The `persist` key determines the `localStorage` entry name. Widths are stored under `columnWidths:<persist>` as a JSON object mapping column keys to their saved widths.
+
+## `register()`
+
+The `register()` function returns an object of props to spread onto `VirtualTable.Column`:
+
+```tsx
+<VirtualTable.Column {...register('name', { defaultValue: '2fr' })}>
+  Name
+</VirtualTable.Column>
+```
+
+What `register('name', { defaultValue: '2fr' })` returns:
+
+| Prop          | Value                                          |
+| ------------- | ---------------------------------------------- |
+| `width`       | Saved width from localStorage, or `defaultValue` if none saved |
+| `resizable`   | `true`                                         |
+| `onResizeEnd` | Callback that saves the new width to state (and localStorage) |
+
+This means a single spread gives you:
+- The correct width (persisted or default)
+- Resize enabled
+- Automatic persistence on resize end
+
+## Pixel vs relative (`fr`) widths
+
+By default, `register()` saves the final pixel width after a resize. This works well for **fixed-width columns** that should keep their exact size regardless of the table width.
+
+For **proportional columns** that should scale with the table, pass `relative: true`:
+
+```tsx
+<VirtualTable.Column {...register('name', { defaultValue: '2fr', relative: true })}>
+  Name
+</VirtualTable.Column>
+```
+
+| `relative` | Saves           | Behavior after restore                      |
+| ---------- | --------------- | ------------------------------------------- |
+| `false`    | Pixel width     | Column stays at exact pixel width           |
+| `true`     | `fr` value      | Column scales proportionally with table width |
+
+When `relative: true`, the `onResizeEnd` callback saves the `frValue` calculated by `VirtualTable` (e.g. `"1.35fr"`) instead of the pixel width. The `fr` value is computed relative to other `fr` columns at the time of the drag.
+
+## Reset
+
+Call `reset()` to clear all saved widths and revert columns to their default values:
+
+```tsx
+<button onClick={reset}>Reset column widths</button>
+```
+
+This removes the `localStorage` entry and sets the internal state back to an empty object. Columns will fall back to their `defaultValue` on the next render.
+
+## Full example
+
+```tsx
+import { VirtualTable, useTableCache, useTableColumnWidths } from '@requence/table'
+
+function UserTable() {
+  const { register, reset } = useTableColumnWidths({
+    persist: 'user-table-widths',
+  })
+
+  const cache = useTableCache('users', {
+    pageSize: 50,
+    getItemId: (user) => user.id,
+    compare: (a, b) => a.name.localeCompare(b.name),
+    fetchItems: async (offset, limit) => {
+      const res = await fetch(`/api/users?offset=${offset}&limit=${limit}`)
+      return res.json()
+    },
+  })
+
+  return (
+    <div>
+      <div className="flex items-center justify-between p-2">
+        <h2>Users</h2>
+        <button onClick={reset} className="text-sm text-zinc-400">
+          Reset widths
+        </button>
+      </div>
+
+      <VirtualTable
+        totalCount={cache.totalCount}
+        rowHeight={40}
+        onRangeChange={cache.handleRangeChange}
+        className="h-[600px]"
+      >
+        <VirtualTable.Header className="bg-zinc-900 text-sm text-zinc-400">
+          <VirtualTable.Column
+            {...register('name', { defaultValue: '2fr', relative: true })}
+          >
+            Name
+          </VirtualTable.Column>
+          <VirtualTable.Column
+            {...register('email', { defaultValue: '2fr', relative: true })}
+          >
+            Email
+          </VirtualTable.Column>
+          <VirtualTable.Column
+            {...register('role', { defaultValue: '1fr', relative: true })}
+          >
+            Role
+          </VirtualTable.Column>
+        </VirtualTable.Header>
+
+        <VirtualTable.Body>
+          {(index) => {
+            const user = cache.getItem(index)
+            if (!user) return null
+            return (
+              <VirtualTable.Row>
+                <VirtualTable.Cell>{user.name}</VirtualTable.Cell>
+                <VirtualTable.Cell>{user.email}</VirtualTable.Cell>
+                <VirtualTable.Cell>{user.role}</VirtualTable.Cell>
+              </VirtualTable.Row>
+            )
+          }}
+        </VirtualTable.Body>
+      </VirtualTable>
+    </div>
+  )
+}
+```

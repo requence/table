@@ -1,0 +1,122 @@
+---
+title: Introduction
+description: A headless, virtualized table component for React with compound component API, Suspense-compatible data caching, and column width persistence.
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+`@requence/table` is a **headless virtualized table** for React. It gives you high-performance scrolling over large datasets, Suspense-compatible pagination, and column resize persistence — without prescribing any visual design.
+
+## Main exports
+
+The package ships three building blocks:
+
+| Export                   | Purpose                                                                                                 |
+| ------------------------ | ------------------------------------------------------------------------------------------------------- |
+| `VirtualTable`           | Compound component that renders a CSS Grid table with virtual scrolling. Provides `.Header`, `.Column`, `.Body`, `.Row`, `.Cell`, `.SkeletonRow`, `.Empty`, and `.Footer` sub-components. |
+| `useTableCache`          | Suspense-compatible paginated data cache. Handles page fetching, sort-aware upsert, remove, and total count tracking. |
+| `useTableColumnWidths`   | Persists user-resized column widths to `localStorage` and provides a `register()` helper to spread resize props onto columns. |
+
+## Installation
+
+<Tabs>
+  <TabItem label="npm">
+    ```bash
+    npm install @requence/table
+    ```
+  </TabItem>
+  <TabItem label="bun">
+    ```bash
+    bun add @requence/table
+    ```
+  </TabItem>
+</Tabs>
+
+### Peer dependencies
+
+`@requence/table` requires **React 18 or 19** and **react-dom** as peer dependencies:
+
+```json
+"peerDependencies": {
+  "react": "^18.0.0 || ^19.0.0",
+  "react-dom": "^18.0.0 || ^19.0.0"
+}
+```
+
+## Prerequisites
+
+### Tailwind CSS
+
+`@requence/table` uses [tailwind-merge](https://github.com/dcastil/tailwind-merge) internally to compose Tailwind utility classes. Your project **must have Tailwind CSS configured** for the component's built-in styles to take effect.
+
+The component itself does not bundle a stylesheet — it relies on Tailwind's utility classes being available in your build pipeline.
+
+## Architecture
+
+### Headless compound component
+
+`VirtualTable` follows a **compound component** pattern. You compose the table declaratively using sub-components like `VirtualTable.Header`, `VirtualTable.Column`, and `VirtualTable.Body`. These sub-components **render nothing on their own** — they act as declarative configuration markers. The parent `VirtualTable` root extracts their props via an internal `extractSlots()` function and renders the actual DOM.
+
+This means you never fight the component for control over layout or behavior — you declare *what* the table should contain, and the root handles *how* it renders.
+
+### Hooks for state
+
+The two hooks — `useTableCache` and `useTableColumnWidths` — are fully independent of `VirtualTable`. You can use them separately or together. They manage server data pagination and column width persistence respectively, and feed their results into `VirtualTable` via props.
+
+### CSS Grid layout
+
+Under the hood, columns are laid out using CSS Grid. Column widths are compiled into a `grid-template-columns` value and set via a `--vtable-grid-cols` custom property. This means you get native grid behavior — `fr` units, `minmax()`, pixel widths — without wrapper hacks.
+
+### Virtual scrolling
+
+Only rows visible in the viewport (plus a configurable overscan buffer) are rendered to the DOM. The component uses absolute positioning with `translateY` and `flushSync` to ensure flicker-free scrolling at high frame rates.
+
+## Quick example
+
+```tsx
+import { VirtualTable, useTableCache } from '@requence/table'
+
+function UserTable() {
+  const cache = useTableCache('users', {
+    pageSize: 50,
+    getItemId: (user) => user.id,
+    compare: (a, b) => a.name.localeCompare(b.name),
+    fetchItems: async (offset, limit) => {
+      const res = await fetch(`/api/users?offset=${offset}&limit=${limit}`)
+      const data = await res.json()
+      return { items: data.users, total: data.total }
+    },
+  })
+
+  return (
+    <VirtualTable
+      totalCount={cache.totalCount}
+      rowHeight={40}
+      onRangeChange={cache.handleRangeChange}
+      className="h-[600px]"
+    >
+      <VirtualTable.Header className="bg-zinc-900 text-sm text-zinc-400">
+        <VirtualTable.Column width="2fr">Name</VirtualTable.Column>
+        <VirtualTable.Column width="2fr">Email</VirtualTable.Column>
+        <VirtualTable.Column width="1fr">Role</VirtualTable.Column>
+      </VirtualTable.Header>
+
+      <VirtualTable.Body>
+        {(index) => {
+          const user = cache.getItem(index)
+          if (!user) return null
+          return (
+            <VirtualTable.Row>
+              <VirtualTable.Cell>{user.name}</VirtualTable.Cell>
+              <VirtualTable.Cell>{user.email}</VirtualTable.Cell>
+              <VirtualTable.Cell>{user.role}</VirtualTable.Cell>
+            </VirtualTable.Row>
+          )
+        }}
+      </VirtualTable.Body>
+    </VirtualTable>
+  )
+}
+```
+
+This renders a virtualized, paginated table that fetches data on scroll. The next pages dive into each concept in detail.

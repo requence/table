@@ -1,0 +1,97 @@
+---
+title: '@requence/table'
+description: Headless virtualized table for React.
+template: splash
+hero:
+  tagline: Headless virtualized table with compound component API, Suspense-compatible data caching, and column width persistence.
+  actions:
+    - text: Get Started
+      link: /concepts/01-introduction/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/requence/table
+      variant: minimal
+      icon: github
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components'
+import LucideIcon from '../../components/LucideIcon.astro'
+
+## Features
+
+<CardGrid>
+  <Card title="Virtual Scrolling">
+    <LucideIcon name="Rows3" slot="icon" size={22} />
+    Render thousands of rows with constant memory usage. Only visible rows plus a configurable overscan buffer are mounted — the rest is pure CSS `translateY`.
+  </Card>
+  <Card title="Compound API">
+    <LucideIcon name="Component" slot="icon" size={22} />
+    Declarative slot-based component API. Compose `Header`, `Column`, `Body`, `Row`, `Cell`, and more — each is a configuration marker, not a render node.
+  </Card>
+  <Card title="Suspense Caching">
+    <LucideIcon name="Layers" slot="icon" size={22} />
+    `useTableCache` integrates with React Suspense for initial loads and handles paginated fetching, sort-aware mutations, and real-time upserts out of the box.
+  </Card>
+  <Card title="Column Persistence">
+    <LucideIcon name="SlidersHorizontal" slot="icon" size={22} />
+    Users can resize columns by dragging. `useTableColumnWidths` persists widths to localStorage and supports both pixel and fractional (`fr`) values.
+  </Card>
+</CardGrid>
+
+## Quick Example
+
+```tsx
+import { VirtualTable, useTableCache } from '@requence/table'
+
+function Users() {
+  const cache = useTableCache('users', {
+    pageSize: 50,
+    getItemId: (u) => u.id,
+    compare: (a, b) => a.name.localeCompare(b.name),
+    fetchItems: async (offset, limit) => {
+      const res = await fetch(`/api/users?offset=${offset}&limit=${limit}`)
+      return res.json()
+    },
+  })
+
+  return (
+    <VirtualTable
+      totalCount={cache.totalCount}
+      rowHeight={32}
+      onRangeChange={cache.handleRangeChange}
+    >
+      <VirtualTable.Header>
+        <VirtualTable.Column width="2fr">Name</VirtualTable.Column>
+        <VirtualTable.Column width="2fr">Email</VirtualTable.Column>
+        <VirtualTable.Column width={100}>Role</VirtualTable.Column>
+      </VirtualTable.Header>
+
+      <VirtualTable.Body>
+        {(index) => {
+          const user = cache.getItem(index)
+          if (!user) return null
+          return (
+            <VirtualTable.Row>
+              <VirtualTable.Cell>{user.name}</VirtualTable.Cell>
+              <VirtualTable.Cell>{user.email}</VirtualTable.Cell>
+              <VirtualTable.Cell>{user.role}</VirtualTable.Cell>
+            </VirtualTable.Row>
+          )
+        }}
+      </VirtualTable.Body>
+
+      <VirtualTable.Empty>No users found.</VirtualTable.Empty>
+
+      <VirtualTable.Footer>
+        {({ start, end }) => `Rows ${start + 1}–${end}`}
+      </VirtualTable.Footer>
+    </VirtualTable>
+  )
+}
+```
+
+## Installation
+
+```bash
+npm install @requence/table
+```

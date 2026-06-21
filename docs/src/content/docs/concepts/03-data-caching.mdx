@@ -1,0 +1,139 @@
+---
+title: Data Caching
+description: How useTableCache provides Suspense-compatible paginated data caching with sort-aware mutations, known ID tracking, and page invalidation.
+---
+
+## Why a dedicated cache
+
+A virtualized table needs more than a simple data array. It needs:
+
+- **Suspense integration** — the initial fetch should suspend the component so a fallback is shown, while subsequent page fetches should be non-blocking.
+- **Page-based fetching** — only the pages visible in the viewport should be in memory.
+- **Sort-aware mutations** — when a real-time event arrives (e.g. via WebSocket), new items must be inserted at the correct sorted position, not appended.
+- **Count tracking** — the total row count must stay accurate across inserts, removes, and server refetches.
+
+`useTableCache` handles all of this in a single hook.
+
+## Module-level cache
+
+The cache state lives in a **module-level `Map`** keyed by the `key` string you pass to the hook:
+
+```ts
+const cache = useTableCache('users', { ... })
+```
+
+This is critical for Suspense: when the hook throws a promise to suspend the component, React unmounts and remounts the component. A `useState`-based cache would be destroyed. The module-level map survives these cycles — when the component remounts, it finds the existing cache entry and reads the resolved data without re-fetching.
+
+Cache entries are cleaned up on unmount. All entries whose key starts with the provided `key` prefix are deleted.
+
+## First fetch vs subsequent fetches
+
+`useTableCache` treats the **first fetch** differently from all later ones:
+
+| Scenario | Behavior |
+| -------- | -------- |
+| **No cached pages** (first render) | The hook **throws** the fetch promise → React Suspense catches it → your `<Suspense fallback>` renders. When the promise resolves, the component remounts with page 0 available. |
+| **At least one page cached** (scroll-triggered) | The hook sets `loading: true` and fetches in the background. The `Body` render function returns `null` for unfetched indices, causing `SkeletonRow` to render in their place. |
+
+This means you get automatic Suspense integration for the initial load and seamless skeleton loading for subsequent pages — without any conditional rendering in your component.
+
+## Page-based fetching
+
+Pages are fetched on demand as the user scrolls. The flow works like this:
+
+1. `VirtualTable` fires `onRangeChange({ start, end })` with the visible row indices.
+2. You pass this to `cache.handleRangeChange`.
+3. The cache calculates which page indices cover the range (`Math.floor(start / pageSize)` through `Math.floor(end / pageSize)`).
+4. For each uncached, non-inflight page, it calls `fetchItems(offset, limit)`.
+5. When the fetch resolves, the page is stored and a re-render is triggered.
+
+```tsx
+<VirtualTable
+  totalCount={cache.totalCount}
+  rowHeight={40}
+  onRangeChange={cache.handleRangeChange}
+>
+```
+
+Pages that have already been fetched are not re-fetched. Inflight pages are tracked in a `Set` to prevent duplicate requests.
+
+## Sort-aware upsert
+
+`upsert()` handles three cases depending on whether the item already exists:
+
+### 1. Exists on a cached page → update in-place
+
+The cache iterates all cached pages, finds the item by ID, and replaces it. No position change, no count change.
+
+### 2. Known ID but not on a cached page → skip
+
+The cache tracks every ID it has ever seen in a `knownIds` set (see below). If the ID is known but the item isn't on any currently cached page, the upsert is skipped — it's an update to a non-visible item on a page that has been evicted or never fetched.
+
+### 3. Unknown ID → insert at sorted position
+
+This is a genuinely new item. The cache uses **binary search** to find the correct insertion point within the cached pages:
+
+1. Iterate pages in index order.
+2. For each page, compare the item against the first and last elements.
+3. If the item belongs within a page, binary search (`compare()`) to find the exact index and `splice()` it in.
+4. **Invalidate all pages after** the insertion point — their indices have shifted by one.
+
+After insertion:
+
+- If `fetchCount` is provided, a **debounced server count fetch** is triggered to get the authoritative total.
+- If `fetchCount` is not provided, `totalCount` is incremented optimistically (which may drift if items are being added to non-cached pages).
+
+## Known ID tracking
+
+The `knownIds` set stores every item ID the cache has ever seen across all fetched pages. This solves a subtle problem:
+
+> When a real-time event arrives with an item ID, is it a **new item** or an **update to an existing item on a page we evicted**?
+
+Without `knownIds`, the cache would have to assume every unknown-to-cached-pages ID is new and increment `totalCount` — causing drift. With `knownIds`, the cache can distinguish:
+
+| Scenario | `knownIds.has(id)` | Action |
+| -------- | ------------------ | ------ |
+| Item on a cached page | *(found by scan)* | Update in-place |
+| Item seen before, page evicted | `true` | Skip (no count change) |
+| Genuinely new item | `false` | Insert + count adjustment |
+
+## Debounced `fetchCount`
+
+When `fetchCount` is provided in the options, the cache calls it (debounced at 150ms) after inserting a new item. This replaces the optimistic `totalCount += 1` with the **authoritative count from the server**.
+
+```ts
+const cache = useTableCache('users', {
+  // ...
+  fetchCount: async () => {
+    const res = await fetch('/api/users/count')
+    const data = await res.json()
+    return data.count
+  },
+})
+```
+
+The debounce prevents a burst of real-time events from firing many count requests. Only the last one in a 150ms window executes.
+
+If `fetchCount` is not provided, the cache falls back to `totalCount += 1` on insert and `totalCount -= 1` on remove.
+
+## Remove with page invalidation
+
+`remove(id)` deletes an item from the cache:
+
+1. The ID is removed from `knownIds`.
+2. All cached pages are scanned for the item. If found, it's spliced out.
+3. `totalCount` is decremented by 1.
+4. **All pages after the removal point are invalidated** (deleted from the cache). Their indices have shifted, so they'll be re-fetched when scrolled into view.
+
+```ts
+cache.remove('user-123')
+```
+
+## Reset
+
+`reset()` clears all cached pages and pending timers. On the next render, the cache re-creates its entry and the component **re-suspends** — showing your Suspense fallback while the first page is fetched fresh.
+
+```ts
+// Useful after changing sort order or filters
+cache.reset()
+```

@@ -1,0 +1,245 @@
+---
+title: VirtualTable
+description: API reference for the VirtualTable compound component — a headless, virtualized React table with CSS grid layout.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+`VirtualTable` is a compound component that renders a virtualized, scrollable table using CSS grid. Only the rows within (and slightly outside) the viewport are mounted, keeping DOM size constant regardless of dataset size. All layout is driven by a single CSS custom property, so every row — header, body, skeleton, empty — shares the same column grid.
+
+## Import
+
+```typescript
+import { VirtualTable } from '@requence/table'
+```
+
+## Usage
+
+```tsx
+<VirtualTable totalCount={1000} rowHeight={40}>
+  <VirtualTable.Header>
+    <VirtualTable.Column width="2fr">Name</VirtualTable.Column>
+    <VirtualTable.Column width="1fr">Email</VirtualTable.Column>
+  </VirtualTable.Header>
+
+  <VirtualTable.Body>
+    {(index) => {
+      const item = getItem(index)
+      if (!item) return null
+      return (
+        <VirtualTable.Row>
+          <VirtualTable.Cell>{item.name}</VirtualTable.Cell>
+          <VirtualTable.Cell>{item.email}</VirtualTable.Cell>
+        </VirtualTable.Row>
+      )
+    }}
+  </VirtualTable.Body>
+
+  <VirtualTable.SkeletonRow>
+    <VirtualTable.Cell>Loading…</VirtualTable.Cell>
+  </VirtualTable.SkeletonRow>
+
+  <VirtualTable.Empty>No results found.</VirtualTable.Empty>
+
+  <VirtualTable.Footer>
+    {({ start, end }) => <span>Showing {start}–{end}</span>}
+  </VirtualTable.Footer>
+</VirtualTable>
+```
+
+## VirtualTable Props
+
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `totalCount` | `number` | — | **Required.** Total number of rows in the dataset. |
+| `rowHeight` | `number` | — | **Required.** Fixed height of each row in pixels. |
+| `overscan` | `number` | `5` | Number of extra rows rendered above and below the viewport. |
+| `onRangeChange` | `(range: { start: number; end: number }) => void` | — | Called when the visible row range changes. Wire this to `useTableCache().handleRangeChange` to trigger page fetches. |
+| `className` | `string` | — | Additional class name for the outer container. |
+| `style` | `CSSProperties` | — | Additional inline styles for the outer container. |
+| `aria-label` | `string` | — | Accessible label for the table element. |
+| `children` | `ReactNode` | — | Slot components (Header, Body, SkeletonRow, Empty, Footer). |
+
+## Sub-Components
+
+### `VirtualTable.Header`
+
+Wraps the column definitions. Renders as a sticky header row.
+
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `className` | `string` | — | Additional class name for the header row group. |
+| `children` | `ReactNode` | — | One or more `VirtualTable.Column` elements. |
+
+### `VirtualTable.Column`
+
+Defines a single column's width and header content.
+
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `width` | `number \| string` | `'1fr'` | Column width. A **number** is treated as pixels. A **string** is used as a CSS grid track value (e.g. `'1fr'`, `'200px'`, `'minmax(100px, 2fr)'`). |
+| `className` | `string` | — | Additional class name for the header cell. |
+| `resizable` | `boolean` | `false` | Whether the column can be resized by dragging a handle on its right edge. |
+| `minWidth` | `number` | `50` | Minimum width in pixels during resize. |
+| `maxWidth` | `number` | — | Maximum width in pixels during resize. |
+| `transparent` | `boolean` | — | Marks the column as transparent — the row background will not extend behind it. Useful for action columns that sit outside the visual row. |
+| `onResizeStart` | `() => void` | — | Called when a resize drag starts. |
+| `onResizeEnd` | `(width: number, startWidth: number, frValue: number) => void` | — | Called when a resize drag ends. See [Column Resizing](#column-resizing). |
+| `children` | `ReactNode` | — | Header cell content. |
+
+#### Column Width Types
+
+- **Number** (e.g. `200`) — Fixed pixel width. The column will always be exactly that many pixels wide and does not participate in flexible distribution.
+- **String** (e.g. `'1fr'`, `'2fr'`) — CSS grid fractional unit. Columns share remaining space proportionally. The default is `'1fr'`.
+- For string widths, `minWidth` is used to generate a `minmax(50px, 1fr)` grid track, preventing columns from collapsing below their minimum.
+
+#### Column Resizing
+
+When `resizable` is `true`, a drag handle appears on the column's right edge. During the drag:
+
+1. The column's grid track is replaced with a pixel value.
+2. The pixel value is clamped between `minWidth` and `maxWidth` (and the available container width).
+3. `onResizeStart()` is called when dragging begins.
+4. `onResizeEnd(width, startWidth, frValue)` is called when the mouse is released:
+   - **`width`** — The final pixel width of the column.
+   - **`startWidth`** — The pixel width before the drag started.
+   - **`frValue`** — The equivalent `fr` value relative to the other flexible columns. Use this when you want to persist proportional widths rather than fixed pixels.
+
+### `VirtualTable.Body`
+
+Provides the render function for each row.
+
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `children` | `(index: number) => ReactNode \| null` | — | **Required.** Render function called for each visible row index. Return `null` to render the skeleton row instead (e.g. when the item hasn't been fetched yet). |
+
+### `VirtualTable.Row`
+
+Wrapper element for a data row. Extends all standard `div` props.
+
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `className` | `string` | — | Additional class name merged onto the row. |
+| `style` | `CSSProperties` | — | Additional inline styles. |
+| `...rest` | `ComponentProps<'div'>` | — | All other `div` props are forwarded (e.g. `onClick`, `onContextMenu`). |
+
+<Aside type="tip">
+  The row element has `group/row` applied via Tailwind, so child cells can use `group-hover/row:` utilities for hover effects.
+</Aside>
+
+### `VirtualTable.Cell`
+
+A single cell within a row. Extends all standard `div` props.
+
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `showOnHover` | `boolean` | — | When `true`, cell content is hidden by default and only appears when the row is hovered. Useful for action buttons. |
+| `colSpan` | `number` | — | Number of columns this cell spans. Sets `grid-column: span N`. |
+| `className` | `string` | — | Additional class name for the cell. |
+| `...rest` | `ComponentProps<'div'>` | — | All other `div` props are forwarded. |
+
+### `VirtualTable.SkeletonRow`
+
+Placeholder row rendered when `Body.children` returns `null` for an index. Extends all standard `div` props.
+
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `className` | `string` | — | Additional class name for the skeleton row. |
+| `children` | `ReactNode` | — | Skeleton content (e.g. shimmer elements). |
+| `...rest` | `ComponentProps<'div'>` | — | All other `div` props are forwarded. |
+
+### `VirtualTable.Empty`
+
+Shown when `totalCount` is `0`. Rendered inside a centered flex container below the header.
+
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `className` | `string` | — | Additional class name for the empty state container. |
+| `children` | `ReactNode` | — | Empty state content. |
+
+### `VirtualTable.Footer`
+
+Rendered below the scrollable area when `totalCount > 0`. Receives the current visible range.
+
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `className` | `string` | — | Additional class name for the footer container. |
+| `children` | `(range: { start: number; end: number }) => ReactNode` | — | **Required.** Render function that receives the visible range. |
+
+## Factory Functions
+
+Factory functions create pre-configured slot components with default props baked in. This is useful when you want a consistent look across multiple tables without repeating the same props.
+
+```typescript
+import {
+  createTableHeader,
+  createTableColumn,
+  createTableBody,
+  createTableRow,
+  createTableSkeletonRow,
+  createTableEmpty,
+  createTableFooter,
+} from '@requence/table'
+```
+
+Each factory takes an optional `Partial` of the corresponding props type and returns a `SlotComponent` that can be used in place of the built-in compound component:
+
+```typescript
+const Header = createTableHeader({ className: 'bg-gray-100 border-b' })
+const Column = createTableColumn({ resizable: true, minWidth: 80 })
+const Body = createTableBody()
+const Row = createTableRow({ className: 'hover:bg-gray-50 border-b' })
+const SkeletonRow = createTableSkeletonRow({ className: 'animate-pulse' })
+const Empty = createTableEmpty({ className: 'py-20 text-gray-400' })
+const Footer = createTableFooter({ className: 'px-4 py-2 text-sm' })
+```
+
+Then use them as drop-in replacements:
+
+```tsx
+<VirtualTable totalCount={totalCount} rowHeight={40}>
+  <Header>
+    <Column width="2fr">Name</Column>
+    <Column width="1fr">Email</Column>
+  </Header>
+
+  <Body>
+    {(index) => {
+      const item = getItem(index)
+      if (!item) return null
+      return (
+        <Row>
+          <VirtualTable.Cell>{item.name}</VirtualTable.Cell>
+          <VirtualTable.Cell>{item.email}</VirtualTable.Cell>
+        </Row>
+      )
+    }}
+  </Body>
+
+  <SkeletonRow>
+    <VirtualTable.Cell colSpan={2}>Loading…</VirtualTable.Cell>
+  </SkeletonRow>
+
+  <Empty>No results found.</Empty>
+
+  <Footer>
+    {({ start, end }) => <span>Showing {start}–{end}</span>}
+  </Footer>
+</VirtualTable>
+```
+
+Props passed at the usage site are merged with the factory defaults. `className` values are merged via `tailwind-merge`, so utility conflicts are resolved correctly.
+
+## CSS Custom Property
+
+The table sets a CSS custom property on the outer container:
+
+```
+--vtable-grid-cols
+```
+
+This property holds the computed `grid-template-columns` value derived from all `Column` width definitions. Every row (header, body, skeleton) references this property, ensuring all rows share the exact same column grid. During a column resize, this property is updated live on the container element.
+
+<Aside type="note">
+  You generally don't need to interact with `--vtable-grid-cols` directly. It exists so that all row types — including skeleton rows that live outside the body render function — automatically inherit the same column layout.
+</Aside>

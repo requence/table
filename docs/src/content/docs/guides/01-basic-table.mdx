@@ -1,0 +1,296 @@
+---
+title: Basic Table
+description: Build a paginated, virtualized user table step by step — from data types to skeleton loading, empty state, and column resize persistence.
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+This guide walks you through building a complete paginated table with `@requence/table`. By the end you'll have virtual scrolling, page-based data fetching, column resizing with persistence, skeleton loading, and an empty state.
+
+<Steps>
+
+1. ### Define the data type
+
+   Start with a TypeScript interface for your row data:
+
+   ```ts
+   interface User {
+     id: string
+     name: string
+     email: string
+     role: 'admin' | 'editor' | 'viewer'
+   }
+   ```
+
+2. ### Set up the API fetch function
+
+   Create the function that `useTableCache` will call to fetch pages. It receives an `offset` and `limit` and must return `{ items, total }`:
+
+   ```ts
+   async function fetchUsers(offset: number, limit: number) {
+     const res = await fetch(
+       `/api/users?offset=${offset}&limit=${limit}`
+     )
+     const data = await res.json()
+     return { items: data.users as User[], total: data.total as number }
+   }
+   ```
+
+3. ### Create the cache
+
+   Use `useTableCache` to set up paginated, Suspense-compatible data fetching. The `compare` function determines sort order for real-time upserts:
+
+   ```tsx
+   import { useTableCache } from '@requence/table'
+
+   function UserTable() {
+     const cache = useTableCache<User>('users', {
+       pageSize: 50,
+       getItemId: (user) => user.id,
+       compare: (a, b) => a.name.localeCompare(b.name),
+       fetchItems: fetchUsers,
+     })
+
+     // cache.totalCount — total rows
+     // cache.getItem(index) — get row by index (undefined if not fetched)
+     // cache.handleRangeChange — pass to VirtualTable.onRangeChange
+   }
+   ```
+
+   :::note
+   Wrap the component in `<Suspense fallback={...}>` — the first page fetch will suspend the component.
+   :::
+
+4. ### Render the table
+
+   Compose the `VirtualTable` with `Header`, `Column`, `Body`, `Row`, and `Cell`:
+
+   ```tsx
+   import { VirtualTable } from '@requence/table'
+
+   return (
+     <VirtualTable
+       totalCount={cache.totalCount}
+       rowHeight={40}
+       onRangeChange={cache.handleRangeChange}
+       className="h-[600px]"
+       aria-label="Users"
+     >
+       <VirtualTable.Header className="bg-zinc-900 text-xs uppercase text-zinc-500">
+         <VirtualTable.Column width="2fr" className="px-4 py-2">
+           Name
+         </VirtualTable.Column>
+         <VirtualTable.Column width="2fr" className="px-4 py-2">
+           Email
+         </VirtualTable.Column>
+         <VirtualTable.Column width="1fr" className="px-4 py-2">
+           Role
+         </VirtualTable.Column>
+       </VirtualTable.Header>
+
+       <VirtualTable.Body>
+         {(index) => {
+           const user = cache.getItem(index)
+           if (!user) return null
+           return (
+             <VirtualTable.Row className="border-b border-zinc-800">
+               <VirtualTable.Cell className="px-4">{user.name}</VirtualTable.Cell>
+               <VirtualTable.Cell className="px-4">{user.email}</VirtualTable.Cell>
+               <VirtualTable.Cell className="px-4">{user.role}</VirtualTable.Cell>
+             </VirtualTable.Row>
+           )
+         }}
+       </VirtualTable.Body>
+     </VirtualTable>
+   )
+   ```
+
+   When `cache.getItem(index)` returns `undefined` (page not yet fetched), the render function returns `null`. Right now nothing renders for those rows — we'll add skeleton loading in step 6.
+
+5. ### Add column resizing
+
+   Use `useTableColumnWidths` to make columns resizable and persist widths to `localStorage`:
+
+   ```tsx
+   import { useTableColumnWidths } from '@requence/table'
+
+   const { register, reset } = useTableColumnWidths({
+     persist: 'user-table',
+   })
+   ```
+
+   Replace static width/className props on each column with `register()`:
+
+   ```tsx
+   <VirtualTable.Column
+     {...register('name', { defaultValue: '2fr', relative: true })}
+     className="px-4 py-2"
+   >
+     Name
+   </VirtualTable.Column>
+   ```
+
+   The `register()` spread provides `width`, `resizable`, and `onResizeEnd`. Your `className` is merged on top.
+
+6. ### Add skeleton loading
+
+   Add a `SkeletonRow` to show placeholders while pages are loading:
+
+   ```tsx
+   <VirtualTable.SkeletonRow className="border-b border-zinc-800">
+     <VirtualTable.Cell className="px-4">
+       <div className="h-3 w-24 animate-pulse rounded bg-zinc-800" />
+     </VirtualTable.Cell>
+     <VirtualTable.Cell className="px-4">
+       <div className="h-3 w-40 animate-pulse rounded bg-zinc-800" />
+     </VirtualTable.Cell>
+     <VirtualTable.Cell className="px-4">
+       <div className="h-3 w-16 animate-pulse rounded bg-zinc-800" />
+     </VirtualTable.Cell>
+   </VirtualTable.SkeletonRow>
+   ```
+
+   Whenever the `Body` render function returns `null`, `VirtualTable` renders this skeleton in the row's place. The skeleton uses the same CSS Grid template, so the placeholders align with the header columns.
+
+7. ### Add empty state and footer
+
+   Add an `Empty` slot for when there are no results, and a `Footer` to show the current scroll position:
+
+   ```tsx
+   <VirtualTable.Empty className="py-20 text-center text-zinc-500">
+     No users found.
+   </VirtualTable.Empty>
+
+   <VirtualTable.Footer className="border-t border-zinc-800 px-4 py-2 text-xs text-zinc-500">
+     {({ start, end }) => (
+       <span>
+         Showing rows {start + 1}–{end} of {cache.totalCount}
+       </span>
+     )}
+   </VirtualTable.Footer>
+   ```
+
+   The empty state renders when `totalCount` is `0`. The footer receives the current visible `{ start, end }` range and only renders when `totalCount > 0`.
+
+</Steps>
+
+## Full example
+
+Here's the complete component combining all the steps above:
+
+```tsx
+import { Suspense } from 'react'
+import { VirtualTable, useTableCache, useTableColumnWidths } from '@requence/table'
+
+interface User {
+  id: string
+  name: string
+  email: string
+  role: 'admin' | 'editor' | 'viewer'
+}
+
+async function fetchUsers(offset: number, limit: number) {
+  const res = await fetch(`/api/users?offset=${offset}&limit=${limit}`)
+  const data = await res.json()
+  return { items: data.users as User[], total: data.total as number }
+}
+
+function UserTable() {
+  const { register, reset } = useTableColumnWidths({
+    persist: 'user-table',
+  })
+
+  const cache = useTableCache<User>('users', {
+    pageSize: 50,
+    getItemId: (user) => user.id,
+    compare: (a, b) => a.name.localeCompare(b.name),
+    fetchItems: fetchUsers,
+  })
+
+  return (
+    <div>
+      <div className="flex items-center justify-between px-4 py-2">
+        <h2 className="text-sm font-medium">Users</h2>
+        <button onClick={reset} className="text-xs text-zinc-400 hover:text-zinc-200">
+          Reset widths
+        </button>
+      </div>
+
+      <VirtualTable
+        totalCount={cache.totalCount}
+        rowHeight={40}
+        onRangeChange={cache.handleRangeChange}
+        className="h-[600px]"
+        aria-label="Users"
+      >
+        <VirtualTable.Header className="bg-zinc-900 text-xs uppercase text-zinc-500">
+          <VirtualTable.Column
+            {...register('name', { defaultValue: '2fr', relative: true })}
+            className="px-4 py-2"
+          >
+            Name
+          </VirtualTable.Column>
+          <VirtualTable.Column
+            {...register('email', { defaultValue: '2fr', relative: true })}
+            className="px-4 py-2"
+          >
+            Email
+          </VirtualTable.Column>
+          <VirtualTable.Column
+            {...register('role', { defaultValue: '1fr', relative: true })}
+            className="px-4 py-2"
+          >
+            Role
+          </VirtualTable.Column>
+        </VirtualTable.Header>
+
+        <VirtualTable.Body>
+          {(index) => {
+            const user = cache.getItem(index)
+            if (!user) return null
+            return (
+              <VirtualTable.Row className="border-b border-zinc-800 hover:bg-zinc-900/50">
+                <VirtualTable.Cell className="px-4">{user.name}</VirtualTable.Cell>
+                <VirtualTable.Cell className="px-4">{user.email}</VirtualTable.Cell>
+                <VirtualTable.Cell className="px-4 capitalize">{user.role}</VirtualTable.Cell>
+              </VirtualTable.Row>
+            )
+          }}
+        </VirtualTable.Body>
+
+        <VirtualTable.SkeletonRow className="border-b border-zinc-800">
+          <VirtualTable.Cell className="px-4">
+            <div className="h-3 w-24 animate-pulse rounded bg-zinc-800" />
+          </VirtualTable.Cell>
+          <VirtualTable.Cell className="px-4">
+            <div className="h-3 w-40 animate-pulse rounded bg-zinc-800" />
+          </VirtualTable.Cell>
+          <VirtualTable.Cell className="px-4">
+            <div className="h-3 w-16 animate-pulse rounded bg-zinc-800" />
+          </VirtualTable.Cell>
+        </VirtualTable.SkeletonRow>
+
+        <VirtualTable.Empty className="py-20 text-center text-zinc-500">
+          No users found.
+        </VirtualTable.Empty>
+
+        <VirtualTable.Footer className="border-t border-zinc-800 px-4 py-2 text-xs text-zinc-500">
+          {({ start, end }) => (
+            <span>
+              Showing rows {start + 1}–{end} of {cache.totalCount}
+            </span>
+          )}
+        </VirtualTable.Footer>
+      </VirtualTable>
+    </div>
+  )
+}
+
+export default function UsersPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-zinc-500">Loading users…</div>}>
+      <UserTable />
+    </Suspense>
+  )
+}
+```
