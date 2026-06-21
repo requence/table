@@ -2,6 +2,8 @@
 
 Headless virtualized table with compound component API, Suspense-compatible data caching, and column width persistence for React.
 
+📖 **[Documentation](https://table.docs.requence.cloud)**
+
 ## Installation
 
 ```bash
