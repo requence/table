@@ -1,11 +1,11 @@
 ---
 title: VirtualTable
-description: API reference for the VirtualTable compound component — a headless, virtualized React table with CSS grid layout.
+description: API reference for the VirtualTable compound component — a headless, virtualized React table.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-`VirtualTable` is a compound component that renders a virtualized, scrollable table using CSS grid. Only the rows within (and slightly outside) the viewport are mounted, keeping DOM size constant regardless of dataset size. All layout is driven by a single CSS custom property, so every row — header, body, skeleton, empty — shares the same column grid.
+`VirtualTable` is a compound component that renders a virtualized, scrollable table. Only the rows within (and slightly outside) the viewport are mounted, keeping DOM size constant regardless of dataset size. All rows — header, body, skeleton, empty — share the same column layout.
 
 ## Import
 
@@ -58,7 +58,7 @@ import { VirtualTable } from '@requence/table'
 | `className` | `string` | — | Additional class name for the outer container. |
 | `style` | `CSSProperties` | — | Additional inline styles for the outer container. |
 | `aria-label` | `string` | — | Accessible label for the table element. |
-| `children` | `ReactNode` | — | Slot components (Header, Body, SkeletonRow, Empty, Footer). |
+| `children` | `ReactNode` | — | Sub-components (Header, Body, SkeletonRow, Empty, Footer). |
 
 ## Sub-Components
 
@@ -77,7 +77,7 @@ Defines a single column's width and header content.
 
 | Prop | Type | Default | Description |
 |---|---|---|---|
-| `width` | `number \| string` | `'1fr'` | Column width. A **number** is treated as pixels. A **string** is used as a CSS grid track value (e.g. `'1fr'`, `'200px'`, `'minmax(100px, 2fr)'`). |
+| `width` | `number \| string` | `'1fr'` | Column width. A **number** is treated as pixels. A **string** is used as a flexible unit (e.g. `'1fr'`, `'2fr'`). |
 | `className` | `string` | — | Additional class name for the header cell. |
 | `resizable` | `boolean` | `false` | Whether the column can be resized by dragging a handle on its right edge. |
 | `minWidth` | `number` | `50` | Minimum width in pixels during resize. |
@@ -90,15 +90,15 @@ Defines a single column's width and header content.
 #### Column Width Types
 
 - **Number** (e.g. `200`) — Fixed pixel width. The column will always be exactly that many pixels wide and does not participate in flexible distribution.
-- **String** (e.g. `'1fr'`, `'2fr'`) — CSS grid fractional unit. Columns share remaining space proportionally. The default is `'1fr'`.
-- For string widths, `minWidth` is used to generate a `minmax(50px, 1fr)` grid track, preventing columns from collapsing below their minimum.
+- **String** (e.g. `'1fr'`, `'2fr'`) — Fractional unit. Columns share remaining space proportionally. The default is `'1fr'`.
+- When `minWidth` is set, the column will not collapse below that size.
 
 #### Column Resizing
 
 When `resizable` is `true`, a drag handle appears on the column's right edge. During the drag:
 
-1. The column's grid track is replaced with a pixel value.
-2. The pixel value is clamped between `minWidth` and `maxWidth` (and the available container width).
+1. The column width is updated in real time.
+2. The width is clamped between `minWidth` and `maxWidth` (and the available container width).
 3. `onResizeStart()` is called when dragging begins.
 4. `onResizeEnd(width, startWidth, frValue)` is called when the mouse is released:
    - **`width`** — The final pixel width of the column.
@@ -168,7 +168,7 @@ Rendered below the scrollable area when `totalCount > 0`. Receives the current v
 
 ## Factory Functions
 
-Factory functions create pre-configured slot components with default props baked in. This is useful when you want a consistent look across multiple tables without repeating the same props.
+Factory functions create pre-configured sub-components with default props baked in. This is useful when you want a consistent look across multiple tables without repeating the same props.
 
 ```typescript
 import {
@@ -182,7 +182,7 @@ import {
 } from '@requence/table'
 ```
 
-Each factory takes an optional `Partial` of the corresponding props type and returns a `SlotComponent` that can be used in place of the built-in compound component:
+Each factory takes an optional `Partial` of the corresponding props type and returns a component that can be used in place of the built-in sub-component:
 
 ```typescript
 const Header = createTableHeader({ className: 'bg-gray-100 border-b' })
@@ -230,16 +230,3 @@ Then use them as drop-in replacements:
 
 Props passed at the usage site are merged with the factory defaults. `className` values are merged via `tailwind-merge`, so utility conflicts are resolved correctly.
 
-## CSS Custom Property
-
-The table sets a CSS custom property on the outer container:
-
-```
---vtable-grid-cols
-```
-
-This property holds the computed `grid-template-columns` value derived from all `Column` width definitions. Every row (header, body, skeleton) references this property, ensuring all rows share the exact same column grid. During a column resize, this property is updated live on the container element.
-
-<Aside type="note">
-  You generally don't need to interact with `--vtable-grid-cols` directly. It exists so that all row types — including skeleton rows that live outside the body render function — automatically inherit the same column layout.
-</Aside>

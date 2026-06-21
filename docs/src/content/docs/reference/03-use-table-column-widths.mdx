@@ -63,7 +63,7 @@ const columnWidths = useTableColumnWidths({ persist: 'users-table' })
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `defaultValue` | `number \| string` | — | Default width before any resize has occurred. A **number** is pixels, a **string** is a CSS grid value (e.g. `'1fr'`, `'2fr'`). If omitted, the column uses `VirtualTable.Column`'s own default (`'1fr'`). |
+| `defaultValue` | `number \| string` | — | Default width before any resize has occurred. A **number** is pixels, a **string** is a flexible unit (e.g. `'1fr'`, `'2fr'`). If omitted, the column uses `VirtualTable.Column`'s own default (`'1fr'`). |
 | `relative` | `boolean` | `false` | When `true`, resized widths are stored as `fr` values (e.g. `'1.5fr'`) instead of pixel values. This keeps column proportions consistent across different viewport sizes. |
 
 ### Return Value

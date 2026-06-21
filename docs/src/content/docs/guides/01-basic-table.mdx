@@ -150,11 +150,11 @@ This guide walks you through building a complete paginated table with `@requence
    </VirtualTable.SkeletonRow>
    ```
 
-   Whenever the `Body` render function returns `null`, `VirtualTable` renders this skeleton in the row's place. The skeleton uses the same CSS Grid template, so the placeholders align with the header columns.
+   Whenever the `Body` render function returns `null`, `VirtualTable` renders this skeleton in the row's place. The skeleton shares the same column layout, so the placeholders align with the header columns.
 
 7. ### Add empty state and footer
 
-   Add an `Empty` slot for when there are no results, and a `Footer` to show the current scroll position:
+   Add an `Empty` sub-component for when there are no results, and a `Footer` to show the current scroll position:
 
    ```tsx
    <VirtualTable.Empty className="py-20 text-center text-zinc-500">

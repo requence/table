@@ -18,7 +18,7 @@ This package uses [Tailwind CSS](https://tailwindcss.com/) utility classes inter
 
 ### VirtualTable
 
-A compound component for rendering large datasets with virtual scrolling and CSS Grid layout.
+A compound component for rendering large datasets with virtual scrolling.
 
 ```tsx
 import { VirtualTable } from '@requence/table'
@@ -101,7 +101,7 @@ All exports are available from the package root:
 | Export | Type | Description |
 | --- | --- | --- |
 | `VirtualTable` | Component | Compound component (`.Header`, `.Column`, `.Body`, `.Row`, `.Cell`, `.SkeletonRow`, `.Empty`, `.Footer`) |
-| `createTable*` | Functions | Factory functions for creating slot components with baked-in defaults |
+| `createTable*` | Functions | Factory functions for creating pre-configured sub-components with baked-in defaults |
 | `useTableCache` | Hook | Suspense-compatible paginated data cache |
 | `useTableColumnWidths` | Hook | Column width persistence with localStorage |
 

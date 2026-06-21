@@ -1,6 +1,6 @@
 ---
 title: Virtual Table
-description: How VirtualTable works — compound components, slot extraction, CSS Grid layout, virtual scrolling, column resizing, and factory functions.
+description: How VirtualTable works — compound components, column layout, virtual scrolling, column resizing, and factory functions.
 ---
 
 ## Compound component pattern
@@ -22,52 +22,28 @@ description: How VirtualTable works — compound components, slot extraction, CS
 
 Each sub-component — `Header`, `Column`, `Body`, `Row`, `Cell`, `SkeletonRow`, `Empty`, `Footer` — is attached to the `VirtualTable` namespace.
 
-## Slot system
+## How sub-components work
 
-The sub-components are **declarative config markers that render `null`**. They never produce DOM on their own.
-
-When `VirtualTable` renders, it calls an internal `extractSlots()` function that walks its children, identifies each slot by a static `.slot` property on the component type, and collects their props into a structured `Slots` object:
-
-```ts
-interface Slots {
-  header: { className?: string; columns: ColumnDef[] } | null
-  body: VirtualTableBodyProps | null
-  skeletonRow: VirtualTableSkeletonRowProps | null
-  empty: VirtualTableEmptyProps | null
-  footer: VirtualTableFooterProps | null
-}
-```
-
-The root component then uses this data to build the actual DOM — header cells, virtual rows, footer, or empty state.
+The sub-components are **declarative** — you use them to describe the table's structure, and `VirtualTable` takes care of rendering the actual DOM.
 
 This design means:
 
 - **No wrapper divs** from sub-components polluting the DOM tree
-- **Full control** over the rendered output stays with the root
+- **Full control** over the rendered output stays with `VirtualTable`
 - **ClassNames merge** via `tailwind-merge` — defaults from factory functions are combined with per-instance overrides
 
-## CSS Grid layout
+## Column layout
 
-Column widths define a CSS Grid layout. The root compiles all `VirtualTable.Column` widths into a `grid-template-columns` value and sets it on a `--vtable-grid-cols` custom property:
+Column widths are defined on each `VirtualTable.Column`. All rows — header, body, and skeleton — share the same column widths, keeping everything perfectly aligned.
 
-```
---vtable-grid-cols: minmax(0, 2fr) minmax(0, 2fr) minmax(50px, 1fr)
-```
+| Width value  | Use case                    |
+| ------------ | --------------------------- |
+| `'1fr'`      | Proportional, flexible      |
+| `'2fr'`      | Double-width proportional   |
+| `200`        | Fixed pixel width           |
+| *(omitted)*  | Default — equal distribution|
 
-Both header rows and data rows reference this same custom property, keeping columns perfectly aligned. You can use any valid CSS Grid column value:
-
-| Width value  | Resulting template        | Use case                    |
-| ------------ | ------------------------- | --------------------------- |
-| `'1fr'`      | `minmax(0, 1fr)`          | Proportional, flexible      |
-| `'2fr'`      | `minmax(0, 2fr)`          | Double-width proportional   |
-| `200`        | `200px`                   | Fixed pixel width           |
-| *(omitted)*  | `minmax(0, 1fr)`          | Default — equal distribution|
-
-When `minWidth` is set on a column, it replaces the `0` in `minmax()`:
-
-```
-minmax(120px, 2fr)
-```
+When `minWidth` is set on a column, it prevents the column from collapsing below that size.
 
 ## Virtual scrolling
 
@@ -76,8 +52,8 @@ minmax(120px, 2fr)
 ### How it works
 
 1. **Scroll handler** — On every scroll event, `VirtualTable` calculates the visible row range from `scrollTop`, `clientHeight`, and `rowHeight`.
-2. **`flushSync` update** — The new range is applied synchronously via React's `flushSync` to prevent visual tearing during fast scrolling.
-3. **Absolute positioning** — Each row is positioned using `translateY(index × rowHeight)` within a sentinel `div` whose height equals `totalCount × rowHeight`. This gives the scrollbar correct proportions.
+2. **Synchronous update** — The new range is applied synchronously to prevent visual tearing during fast scrolling.
+3. **Absolute positioning** — Each row is positioned using `translateY(index × rowHeight)`. A container element is sized to `totalCount × rowHeight` to give the scrollbar correct proportions.
 4. **CSS containment** — Rows use `contain: layout style paint` and `will-change: transform` for optimal compositing.
 
 ### `onRangeChange` callback
@@ -94,7 +70,7 @@ Every time the visible range changes, `VirtualTable` calls `onRangeChange` with 
 
 ## Column resizing
 
-Columns with `resizable={true}` render a drag handle on their right edge. Dragging the handle resizes the column in real time by updating the `--vtable-grid-cols` custom property directly on the container element.
+Columns with `resizable={true}` render a drag handle on their right edge. Dragging the handle resizes the column in real time.
 
 ### Resize behavior
 
@@ -164,7 +140,7 @@ Then use them in place of the `VirtualTable.*` sub-components:
 </VirtualTable>
 ```
 
-**How merging works:** When `extractSlots()` encounters a factory-created component, it reads its `.slotDefaults` property and merges those with the instance props. ClassNames are combined via `tailwind-merge`, so instance classes override conflicting defaults.
+**How merging works:** Factory-created components have built-in default props that are merged with instance props. ClassNames are combined via `tailwind-merge`, so instance classes override conflicting defaults.
 
 Available factory functions:
 
@@ -180,7 +156,7 @@ Available factory functions:
 
 ## Empty state
 
-When `totalCount` is `0` and an `Empty` slot is provided, `VirtualTable` renders the header followed by the empty state content instead of the scroll container:
+When `totalCount` is `0` and an `Empty` sub-component is provided, `VirtualTable` renders the header followed by the empty state content instead of the scroll container:
 
 ```tsx
 <VirtualTable.Empty className="py-20 text-zinc-500">
@@ -192,7 +168,7 @@ The empty state is centered within a flex container. The header still renders ab
 
 ## Skeleton rows
 
-When the `Body` render function returns `null` for a given index (typically because the data hasn't been fetched yet), `VirtualTable` renders the `SkeletonRow` slot in its place:
+When the `Body` render function returns `null` for a given index (typically because the data hasn't been fetched yet), `VirtualTable` renders the `SkeletonRow` sub-component in its place:
 
 ```tsx
 <VirtualTable.SkeletonRow className="animate-pulse">
@@ -205,4 +181,4 @@ When the `Body` render function returns `null` for a given index (typically beca
 </VirtualTable.SkeletonRow>
 ```
 
-Skeleton rows receive the same grid template as data rows, so the placeholder elements align with the header columns. They use the same `DataRow` wrapper internally, inheriting `translateY` positioning and `rowHeight`.
+Skeleton rows receive the same grid template as data rows, so the placeholder elements align with the header columns. They inherit the same positioning and height as regular data rows.

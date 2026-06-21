@@ -67,7 +67,7 @@ const cache = useTableCache(`users-${sortField}-${sortDir}-${filter}`, {
 ```
 
 <Aside type="note">
-  The cache state is stored in a module-level `Map` keyed by the `key` argument. This survives Suspense unmount/remount cycles. On component unmount, all entries for the key are cleaned up.
+  The cache state persists across Suspense unmount/remount cycles. On component unmount, all entries for the key are cleaned up.
 </Aside>
 
 ## Upsert Behavior
@@ -78,7 +78,7 @@ const cache = useTableCache(`users-${sortField}-${sortDir}-${filter}`, {
 
 2. **Item ID is known but on a non-cached page** — The item is **skipped**. The cache has seen this ID in a previous fetch but the page has since been evicted or was never loaded. No action is taken because the server already has the correct data for that page.
 
-3. **Item ID is genuinely new** — The item is inserted at the correct sorted position using a binary search with the `compare` function. Pages after the insertion point are **invalidated** (deleted from cache) because their indices have shifted.
+3. **Item ID is genuinely new** — The item is inserted at the correct sorted position using the `compare` function. Pages after the insertion point are **invalidated** (deleted from cache) because their indices have shifted.
    - If `fetchCount` is provided, a debounced server call updates `totalCount` authoritatively.
    - If `fetchCount` is not provided, `totalCount` is incremented optimistically.
 
@@ -90,8 +90,8 @@ const cache = useTableCache(`users-${sortField}-${sortDir}-${filter}`, {
 
 `remove(id)` performs the following steps:
 
-1. The item is removed from the `knownIds` set.
-2. All cached pages are searched for the item. If found, it is spliced out.
+1. The item's ID is removed from tracking.
+2. All cached pages are searched for the item. If found, it is removed.
 3. `totalCount` is decremented (clamped to 0).
 4. All cached pages **after** the page where the item was found are invalidated, because their indices have shifted by one.
 

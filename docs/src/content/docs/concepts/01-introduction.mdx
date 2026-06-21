@@ -11,11 +11,9 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 The package ships three building blocks:
 
-| Export                   | Purpose                                                                                                 |
-| ------------------------ | ------------------------------------------------------------------------------------------------------- |
-| `VirtualTable`           | Compound component that renders a CSS Grid table with virtual scrolling. Provides `.Header`, `.Column`, `.Body`, `.Row`, `.Cell`, `.SkeletonRow`, `.Empty`, and `.Footer` sub-components. |
-| `useTableCache`          | Suspense-compatible paginated data cache. Handles page fetching, sort-aware upsert, remove, and total count tracking. |
-| `useTableColumnWidths`   | Persists user-resized column widths to `localStorage` and provides a `register()` helper to spread resize props onto columns. |
+- **`VirtualTable`** — Compound component for virtualized, scrollable tables.
+- **`useTableCache`** — Suspense-compatible paginated data cache with real-time mutations.
+- **`useTableColumnWidths`** — Persists user-resized column widths to `localStorage`.
 
 ## Installation
 
@@ -55,21 +53,21 @@ The component itself does not bundle a stylesheet — it relies on Tailwind's ut
 
 ### Headless compound component
 
-`VirtualTable` follows a **compound component** pattern. You compose the table declaratively using sub-components like `VirtualTable.Header`, `VirtualTable.Column`, and `VirtualTable.Body`. These sub-components **render nothing on their own** — they act as declarative configuration markers. The parent `VirtualTable` root extracts their props via an internal `extractSlots()` function and renders the actual DOM.
+`VirtualTable` follows a **compound component** pattern. You compose the table declaratively using sub-components like `VirtualTable.Header`, `VirtualTable.Column`, and `VirtualTable.Body`.
 
-This means you never fight the component for control over layout or behavior — you declare *what* the table should contain, and the root handles *how* it renders.
+You declare *what* the table should contain, and `VirtualTable` handles *how* it renders — you never fight the component for control over layout or behavior.
 
 ### Hooks for state
 
-The two hooks — `useTableCache` and `useTableColumnWidths` — are fully independent of `VirtualTable`. You can use them separately or together. They manage server data pagination and column width persistence respectively, and feed their results into `VirtualTable` via props.
+The two hooks — `useTableCache` and `useTableColumnWidths` — are **fully optional** and independent of `VirtualTable`. You can use them separately, together, or not at all. If your data is already loaded (e.g. from a GraphQL query or local state), you can pass it directly to `VirtualTable` without any hooks.
 
-### CSS Grid layout
+### Column layout
 
-Under the hood, columns are laid out using CSS Grid. Column widths are compiled into a `grid-template-columns` value and set via a `--vtable-grid-cols` custom property. This means you get native grid behavior — `fr` units, `minmax()`, pixel widths — without wrapper hacks.
+Column widths support `fr` units for proportional sizing, pixel values for fixed widths, and `minmax()` constraints — all columns stay perfectly aligned across header, body, and skeleton rows.
 
 ### Virtual scrolling
 
-Only rows visible in the viewport (plus a configurable overscan buffer) are rendered to the DOM. The component uses absolute positioning with `translateY` and `flushSync` to ensure flicker-free scrolling at high frame rates.
+Only rows visible in the viewport (plus a configurable overscan buffer) are rendered to the DOM. The component uses absolute positioning with `translateY` for flicker-free scrolling at high frame rates.
 
 ## Quick example
 
@@ -119,4 +117,46 @@ function UserTable() {
 }
 ```
 
-This renders a virtualized, paginated table that fetches data on scroll. The next pages dive into each concept in detail.
+This renders a virtualized, paginated table that fetches data on scroll.
+
+### Static table
+
+If your data is already loaded, you can use `VirtualTable` without `useTableCache`:
+
+```tsx
+import { VirtualTable } from '@requence/table'
+
+interface Group {
+  id: string
+  name: string
+  description: string
+}
+
+function GroupList({ groups }: { groups: Group[] }) {
+  return (
+    <VirtualTable totalCount={groups.length} rowHeight={40}>
+      <VirtualTable.Header>
+        <VirtualTable.Column width={250}>Name</VirtualTable.Column>
+        <VirtualTable.Column width="1fr">Description</VirtualTable.Column>
+      </VirtualTable.Header>
+
+      <VirtualTable.Body>
+        {(index) => {
+          const group = groups[index]
+          if (!group) return null
+          return (
+            <VirtualTable.Row>
+              <VirtualTable.Cell>{group.name}</VirtualTable.Cell>
+              <VirtualTable.Cell>{group.description}</VirtualTable.Cell>
+            </VirtualTable.Row>
+          )
+        }}
+      </VirtualTable.Body>
+
+      <VirtualTable.Empty>No groups found.</VirtualTable.Empty>
+    </VirtualTable>
+  )
+}
+```
+
+The next pages dive into each concept in detail.

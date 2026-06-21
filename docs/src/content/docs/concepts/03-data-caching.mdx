@@ -1,6 +1,6 @@
 ---
 title: Data Caching
-description: How useTableCache provides Suspense-compatible paginated data caching with sort-aware mutations, known ID tracking, and page invalidation.
+description: How useTableCache provides Suspense-compatible paginated data caching with sort-aware mutations, ID tracking, and page invalidation.
 ---
 
 ## Why a dedicated cache
@@ -14,15 +14,15 @@ A virtualized table needs more than a simple data array. It needs:
 
 `useTableCache` handles all of this in a single hook.
 
-## Module-level cache
+## Cache persistence across Suspense
 
-The cache state lives in a **module-level `Map`** keyed by the `key` string you pass to the hook:
+The cache is keyed by the `key` string you pass to the hook:
 
 ```ts
 const cache = useTableCache('users', { ... })
 ```
 
-This is critical for Suspense: when the hook throws a promise to suspend the component, React unmounts and remounts the component. A `useState`-based cache would be destroyed. The module-level map survives these cycles — when the component remounts, it finds the existing cache entry and reads the resolved data without re-fetching.
+This is critical for Suspense: when the hook suspends the component, React unmounts and remounts it. The cache survives these cycles — when the component remounts, it finds the existing data and reads it without re-fetching.
 
 Cache entries are cleaned up on unmount. All entries whose key starts with the provided `key` prefix are deleted.
 
@@ -55,7 +55,7 @@ Pages are fetched on demand as the user scrolls. The flow works like this:
 >
 ```
 
-Pages that have already been fetched are not re-fetched. Inflight pages are tracked in a `Set` to prevent duplicate requests.
+Pages that have already been fetched are not re-fetched. Duplicate requests for the same page are automatically prevented.
 
 ## Sort-aware upsert
 
@@ -65,37 +65,30 @@ Pages that have already been fetched are not re-fetched. Inflight pages are trac
 
 The cache iterates all cached pages, finds the item by ID, and replaces it. No position change, no count change.
 
-### 2. Known ID but not on a cached page → skip
+### 2. ID seen before but not currently loaded → skip
 
-The cache tracks every ID it has ever seen in a `knownIds` set (see below). If the ID is known but the item isn't on any currently cached page, the upsert is skipped — it's an update to a non-visible item on a page that has been evicted or never fetched.
+If the cache has seen this ID in a previous fetch but the item isn't on any currently loaded page, the upsert is skipped — the server already has the correct data.
 
 ### 3. Unknown ID → insert at sorted position
 
-This is a genuinely new item. The cache uses **binary search** to find the correct insertion point within the cached pages:
-
-1. Iterate pages in index order.
-2. For each page, compare the item against the first and last elements.
-3. If the item belongs within a page, binary search (`compare()`) to find the exact index and `splice()` it in.
-4. **Invalidate all pages after** the insertion point — their indices have shifted by one.
+This is a genuinely new item. The cache finds the correct insertion position using the `compare` function and inserts the item. Pages after the insertion point are **invalidated** because their indices have shifted.
 
 After insertion:
 
 - If `fetchCount` is provided, a **debounced server count fetch** is triggered to get the authoritative total.
-- If `fetchCount` is not provided, `totalCount` is incremented optimistically (which may drift if items are being added to non-cached pages).
+- If `fetchCount` is not provided, `totalCount` is incremented optimistically (which may drift if items are being added to non-loaded pages).
 
-## Known ID tracking
+## ID tracking
 
-The `knownIds` set stores every item ID the cache has ever seen across all fetched pages. This solves a subtle problem:
+The cache remembers every item ID it has ever seen across all fetched pages. This lets it distinguish between:
 
-> When a real-time event arrives with an item ID, is it a **new item** or an **update to an existing item on a page we evicted**?
+| Scenario | Action |
+| -------- | ------ |
+| Item on a currently loaded page | Update in-place |
+| Item seen before, page no longer loaded | Skip (no count change) |
+| Genuinely new item | Insert + count adjustment |
 
-Without `knownIds`, the cache would have to assume every unknown-to-cached-pages ID is new and increment `totalCount` — causing drift. With `knownIds`, the cache can distinguish:
-
-| Scenario | `knownIds.has(id)` | Action |
-| -------- | ------------------ | ------ |
-| Item on a cached page | *(found by scan)* | Update in-place |
-| Item seen before, page evicted | `true` | Skip (no count change) |
-| Genuinely new item | `false` | Insert + count adjustment |
+Without this tracking, the cache would have to assume every ID not found on loaded pages is new, causing `totalCount` to drift.
 
 ## Debounced `fetchCount`
 
@@ -120,8 +113,8 @@ If `fetchCount` is not provided, the cache falls back to `totalCount += 1` on in
 
 `remove(id)` deletes an item from the cache:
 
-1. The ID is removed from `knownIds`.
-2. All cached pages are scanned for the item. If found, it's spliced out.
+1. The item's ID is removed from tracking.
+2. All loaded pages are searched for the item. If found, it is removed.
 3. `totalCount` is decremented by 1.
 4. **All pages after the removal point are invalidated** (deleted from the cache). Their indices have shifted, so they'll be re-fetched when scrolled into view.
 
