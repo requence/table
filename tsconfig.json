@@ -15,7 +15,7 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "isolatedModules": true,
-    "types": [],
+    "types": ["bun", "node"],
     "jsx": "react-jsx",
     "resolveJsonModule": true
   },

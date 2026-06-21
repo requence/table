@@ -1,45 +1,22 @@
-import { mkdir, readdir, rm } from 'node:fs/promises'
-import { join } from 'node:path'
+import { mkdir, rm } from 'node:fs/promises'
 
 const SRC = './src'
 const OUT = './dist'
-
-// Collect all .ts/.tsx source files (exclude tests)
-async function collectEntrypoints(dir: string): Promise<string[]> {
-  const entries: string[] = []
-  for (const entry of await readdir(dir, { withFileTypes: true })) {
-    const fullPath = join(dir, entry.name)
-    if (entry.isDirectory()) {
-      if (entry.name === 'tests') {
-        continue
-      }
-      entries.push(...(await collectEntrypoints(fullPath)))
-    } else if (
-      (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx')) &&
-      !entry.name.endsWith('.spec.ts')
-    ) {
-      entries.push(fullPath)
-    }
-  }
-  return entries
-}
 
 // Clean dist
 await rm(OUT, { recursive: true, force: true })
 await mkdir(OUT, { recursive: true })
 
-const entrypoints = await collectEntrypoints(SRC)
-
 // Force production JSX transform regardless of ambient NODE_ENV
 process.env.NODE_ENV = 'production'
 
 const result = await Bun.build({
-  entrypoints,
+  entrypoints: [`${SRC}/index.ts`],
   outdir: OUT,
   root: SRC,
   target: 'node',
   format: 'esm',
-  splitting: true,
+  splitting: false,
   sourcemap: 'external',
   define: {
     'process.env.NODE_ENV': JSON.stringify('production'),

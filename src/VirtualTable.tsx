@@ -107,7 +107,7 @@ interface Slots {
 
 /* ── Slot system ───────────────────────────────────────────────── */
 
-interface SlotComponent<P> {
+export interface SlotComponent<P> {
   (props: P): ReactNode
   slot: string
   slotDefaults: Partial<P>
