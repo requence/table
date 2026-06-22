@@ -14,6 +14,13 @@ npm install @requence/table
 
 This package uses [Tailwind CSS](https://tailwindcss.com/) utility classes internally (via `tailwind-merge`). Your project must have Tailwind CSS configured for the component to render correctly.
 
+Add the `@source` directive to your CSS entry point so Tailwind scans the package for class names:
+
+```css
+@import "tailwindcss";
+@source "../node_modules/@requence/table";
+```
+
 ## Quick Start
 
 ### VirtualTable
@@ -26,9 +33,8 @@ import { VirtualTable } from '@requence/table'
 function MyTable({ cache }) {
   return (
     <VirtualTable
-      totalCount={cache.totalCount}
+      {...cache}
       rowHeight={32}
-      onRangeChange={cache.handleRangeChange}
     >
       <VirtualTable.Header>
         <VirtualTable.Column width="2fr" resizable>Name</VirtualTable.Column>
@@ -70,6 +76,7 @@ import { useTableCache } from '@requence/table'
 
 const cache = useTableCache('users', {
   pageSize: 50,
+  rowHeight: 32,
   getItemId: (item) => item.id,
   compare: (a, b) => a.name.localeCompare(b.name),
   fetchItems: async (offset, limit) => {

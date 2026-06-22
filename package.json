@@ -27,6 +27,7 @@
     "cs": "changeset",
     "version": "changeset version",
     "release": "bun run build && changeset publish",
+    "dev:example": "cd example && bun --hot ./src/index.ts",
     "prepublishOnly": "bun run build"
   },
   "dependencies": {

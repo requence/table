@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import type { VirtualTableHandle } from './VirtualTable.tsx'
+
 /* ── Types ──────────────────────────────────────────────────────── */
 
 export interface UseTableCacheOptions<T> {
   /** Number of rows per page */
   pageSize: number
+  /** Fixed height of each row in pixels. Used to compute scroll corrections. */
+  rowHeight: number
+  /** Gap between rows in pixels (default: 0). Must match VirtualTable's rowGap. */
+  rowGap?: number
   /** Extract unique ID from an item (for update/remove) */
   getItemId: (item: T) => string
   /**
@@ -29,9 +35,9 @@ export interface UseTableCacheOptions<T> {
   ) => Promise<{ items: T[]; total: number }>
   /**
    * Optional. Fetch just the total count from the server.
-   * Called (debounced) when an upsert arrives for an unknown ID,
-   * where the cache cannot determine if it's a new item or an
-   * update to a never-fetched item.
+   * Called (debounced) when an upsert arrives for an unknown ID that
+   * cannot be placed within a cached page (i.e. it sorts outside the
+   * cached range), or after a within-page insert for drift correction.
    * If not provided, the cache falls back to incrementing totalCount
    * (which may drift when items on non-cached pages are updated).
    */
@@ -39,25 +45,45 @@ export interface UseTableCacheOptions<T> {
 }
 
 export interface TableCache<T> {
+  /** Ref to pass to VirtualTable for scroll correction */
+  ref: React.RefObject<VirtualTableHandle | null>
+  /** Fixed height of each row in pixels */
+  rowHeight: number
+  /** Gap between rows in pixels */
+  rowGap: number
   /** Current total count (updated by fetch results and mutations) */
   totalCount: number
+  /**
+   * Read the live totalCount from the mutable cache state.
+   * Unlike `totalCount` (which is a snapshot taken at render time),
+   * this function always returns the latest value — including changes
+   * made by `upsert()` / `remove()` calls that haven't triggered a
+   * re-render yet. Useful when reading the count from a parent
+   * component via a ref after an imperative mutation.
+   */
+  getTotalCount: () => number
   /** Get item at absolute index. Returns undefined if page not yet fetched. */
   getItem: (index: number) => T | undefined
-  /** Pass this to VirtualTable.onRangeChange — triggers page fetches */
-  handleRangeChange: (range: { start: number; end: number }) => void
+  /**
+   * Pass this to VirtualTable.onRangeChange (or spread the cache return
+   * value onto VirtualTable) — triggers page fetches for visible pages.
+   */
+  onRangeChange: (range: { start: number; end: number }) => void
   /**
    * Upsert an item: if an item with the same ID already exists in a cached
    * page it is updated in-place (no position change, no totalCount change).
    * If the ID is known from a previous fetch but not on a cached page,
    * the item is ignored (it's an update to a non-visible item).
-   * Otherwise the item is inserted at its correct sorted position (using
-   * `compare`) and — if `fetchCount` was provided — a debounced count
-   * re-fetch is triggered to get the authoritative total from the server.
+   * Otherwise the item is handled based on where it sorts relative to
+   * cached pages — inserted surgically within, or deferred to the server
+   * if it falls outside the cached range.
    */
   upsert: (item: T) => void
   /**
    * Remove item by ID. Decrements totalCount.
-   * Removes from all cached pages. Invalidates pages after removal point.
+   * If the item is on a cached page, it is spliced out and subsequent
+   * contiguous pages are surgically adjusted. If the item was above the
+   * viewport, scroll position is corrected to prevent layout shift.
    */
   remove: (id: string) => void
   /** Clear all cached pages. Next render will re-suspend. */
@@ -83,12 +109,23 @@ interface CacheState<T> {
   promise: Promise<void> | null
   /**
    * Tracks every item ID the cache has ever seen in the current result set.
-   * Survives page eviction. Used by `upsert()` to distinguish updates to
-   * non-cached items (no count change) from genuinely new items.
+   * The value is the page index where the item was last seen. This
+   * survives page eviction and is used by `upsert()` to distinguish
+   * updates to non-cached items from genuinely new items, and by
+   * `remove()` to determine if a removed item was above the viewport
+   * for scroll correction.
    */
-  knownIds: Set<string>
+  knownIds: Map<string, number>
   /** Timer handle for the debounced fetchCount call */
   fetchCountTimer: ReturnType<typeof setTimeout> | null
+  /** Last visible range reported by onRangeChange, used for scroll correction decisions */
+  lastVisibleRange: { start: number; end: number } | null
+  /**
+   * Number of upsert events where the item sorted above all cached pages.
+   * Reset when the debounced fetchCount response arrives and scroll
+   * correction is applied.
+   */
+  pendingAboveCount: number
 }
 
 /* ── Module-level cache keyed by useId() ─────────────────────── */
@@ -117,8 +154,10 @@ function resolveCache<T>(
       fetchCount: options.fetchCount,
       getItemId: options.getItemId,
       promise: null,
-      knownIds: new Set(),
+      knownIds: new Map(),
       fetchCountTimer: null,
+      lastVisibleRange: null,
+      pendingAboveCount: 0,
     }
     cacheMap.set(id, state)
 
@@ -132,7 +171,7 @@ function resolveCache<T>(
           s.pages.set(0, result.items)
           s.totalCount = result.total
           for (const item of result.items) {
-            s.knownIds.add(s.getItemId(item))
+            s.knownIds.set(s.getItemId(item), 0)
           }
         }
       })
@@ -153,13 +192,19 @@ function resolveCache<T>(
   return state
 }
 
+/* ── Deferred cleanup timers (StrictMode-safe) ───────────────── */
+
+const cleanupTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
 /* ── Hook ────────────────────────────────────────────────────── */
 
 export function useTableCache<T>(
   key: string,
   options: UseTableCacheOptions<T>,
 ): TableCache<T> {
-  const { pageSize, getItemId, compare, fetchItems, fetchCount } = options
+  const { pageSize, rowHeight, rowGap = 0, getItemId, compare, fetchItems, fetchCount } =
+    options
+  const rowStride = rowHeight + rowGap
 
   const [, forceRender] = useState(0)
   const [iteration, setIteration] = useState(0)
@@ -179,29 +224,55 @@ export function useTableCache<T>(
   const cacheRef = useRef(currentCache)
   cacheRef.current = currentCache
 
+  // Ref to the VirtualTable imperative handle (for scroll correction)
+  const tableRef = useRef<VirtualTableHandle | null>(null)
+
   // ── Suspense: throw if initial fetch is pending ────────────────
   if (currentCache.promise) {
     throw currentCache.promise
   }
 
   // ── Cleanup all cache entries for this key on unmount ──────────
-  useEffect(
-    () => () => {
-      for (const k of cacheMap.keys()) {
-        if (k.startsWith(key)) {
-          cacheMap.delete(k)
+  // Deferred via setTimeout(0) so React StrictMode's simulated
+  // unmount→remount cycle can cancel the timer before it fires.
+  useEffect(() => {
+    const pending = cleanupTimers.get(key)
+    if (pending != null) {
+      clearTimeout(pending)
+      cleanupTimers.delete(key)
+    }
+
+    return () => {
+      const timer = setTimeout(() => {
+        cleanupTimers.delete(key)
+        for (const k of cacheMap.keys()) {
+          if (k.startsWith(key)) {
+            cacheMap.delete(k)
+          }
         }
-      }
-    },
-    [key],
-  )
+      }, 0)
+      cleanupTimers.set(key, timer)
+    }
+  }, [key])
 
   // ── Fetch a page (non-blocking, for scroll-triggered loads) ────
   const fetchPage = useCallback(
     (pageIndex: number) => {
       const c = cacheRef.current
-      if (c.pages.has(pageIndex) || c.inflight.has(pageIndex)) {
+      if (c.inflight.has(pageIndex)) {
         return
+      }
+
+      const existingPage = c.pages.get(pageIndex)
+      if (existingPage) {
+        // Full page — already fetched
+        if (existingPage.length >= pageSize) {
+          return
+        }
+        // Legitimate last page of the dataset — no more items to fetch
+        if (pageIndex * pageSize + pageSize > c.totalCount) {
+          return
+        }
       }
 
       const offset = pageIndex * pageSize
@@ -213,7 +284,7 @@ export function useTableCache<T>(
           c.totalCount = result.total
           c.inflight.delete(pageIndex)
           for (const item of result.items) {
-            c.knownIds.add(c.getItemId(item))
+            c.knownIds.set(c.getItemId(item), pageIndex)
           }
           rerender()
         }
@@ -237,10 +308,11 @@ export function useTableCache<T>(
     [pageSize],
   )
 
-  // ── handleRangeChange ──────────────────────────────────────────
-  const handleRangeChange = useCallback(
+  // ── onRangeChange ─────────────────────────────────────────────
+  const onRangeChange = useCallback(
     (range: { start: number; end: number }) => {
       const c = cacheRef.current
+      c.lastVisibleRange = range
       if (c.totalCount === 0) {
         return
       }
@@ -271,14 +343,29 @@ export function useTableCache<T>(
     c.fetchCountTimer = setTimeout(() => {
       const current = cacheRef.current
       current.fetchCountTimer = null
+
+      const oldCount = current.totalCount
+      const pending = current.pendingAboveCount
+
       current.fetchCount?.().then((total) => {
         if (cacheRef.current === current) {
+          const countDelta = total - oldCount
+          // Cap scroll correction at pendingAboveCount — some of
+          // the delta may be from items inserted below the viewport.
+          const aboveAdjustment = Math.min(pending, Math.max(0, countDelta))
+
+          current.pendingAboveCount = 0
           current.totalCount = total
+
+          if (aboveAdjustment > 0) {
+            tableRef.current?.scrollBy(aboveAdjustment * rowStride)
+          }
+
           rerender()
         }
       })
     }, 150)
-  }, [rerender])
+  }, [rerender, rowStride])
 
   // ── upsert (sort-aware insert or in-place update) ──────────────
   const upsert = useCallback(
@@ -286,7 +373,7 @@ export function useTableCache<T>(
       const c = cacheRef.current
       const id = getItemId(item)
 
-      // ── Check for existing item on cached page → update in-place
+      // ── Case 1: existing item on cached page → update in-place
       for (const [, page] of c.pages) {
         const idx = page.findIndex((p) => getItemId(p) === id)
         if (idx !== -1) {
@@ -296,99 +383,199 @@ export function useTableCache<T>(
         }
       }
 
-      // ── Known ID on a non-cached page → skip (no count change)
+      // ── Case 2: known ID on a non-cached page → skip
       if (c.knownIds.has(id)) {
         return
       }
 
       // ── Unknown ID → genuinely new to this result set ──────────
-      c.knownIds.add(id)
-
-      let inserted = false
+      c.knownIds.set(id, -1) // -1 = not placed on any page yet
 
       const sortedPageIndices = [...c.pages.keys()].sort((a, b) => a - b)
 
+      if (sortedPageIndices.length === 0) {
+        // No cached pages at all — just query count
+        if (c.fetchCount) {
+          debouncedFetchCount()
+        } else {
+          c.totalCount += 1
+        }
+        rerender()
+        return
+      }
+
+      const firstPageIndex = sortedPageIndices[0]
+      const lastPageIndex = sortedPageIndices[sortedPageIndices.length - 1]
+      const firstPage = c.pages.get(firstPageIndex)!
+      const lastPage = c.pages.get(lastPageIndex)!
+
+      // ── Case 4: sorts before first cached item AND there are
+      //    uncached pages before it → item is above viewport
+      if (
+        firstPageIndex > 0 &&
+        firstPage.length > 0 &&
+        c.compare(item, firstPage[0]) < 0
+      ) {
+        c.pendingAboveCount++
+        if (c.fetchCount) {
+          debouncedFetchCount()
+        } else {
+          c.totalCount += 1
+          // Without fetchCount, apply scroll correction immediately
+          tableRef.current?.scrollBy(rowStride)
+        }
+        rerender()
+        return
+      }
+
+      // ── Case 5: sorts after last cached item → below viewport
+      if (
+        lastPage.length > 0 &&
+        c.compare(item, lastPage[lastPage.length - 1]) > 0
+      ) {
+        if (c.fetchCount) {
+          debouncedFetchCount()
+        } else {
+          c.totalCount += 1
+        }
+        rerender()
+        return
+      }
+
+      // ── Case 3 / 6: try to insert within a cached page ─────────
+      let inserted = false
+      let insertedAtIndex: number | null = null
+
       for (const pageIndex of sortedPageIndices) {
         const page = c.pages.get(pageIndex)!
+        if (page.length === 0) {
+          continue
+        }
 
-        if (page.length > 0 && c.compare(item, page[0]) <= 0) {
+        const firstItem = page[0]
+        const lastItem = page[page.length - 1]
+
+        // Item sorts before first item of this page
+        if (c.compare(item, firstItem) <= 0) {
           page.unshift(item)
+          c.knownIds.set(id, pageIndex)
+          surgicalShift(c, pageIndex, pageSize)
+          insertedAtIndex = pageIndex * pageSize
           inserted = true
-          invalidateAfter(c, pageIndex)
           break
         }
 
-        if (page.length > 0) {
-          const lastItem = page[page.length - 1]
-          if (c.compare(item, lastItem) <= 0) {
-            let lo = 0
-            let hi = page.length
-            while (lo < hi) {
-              const mid = (lo + hi) >>> 1
-              if (c.compare(item, page[mid]) <= 0) {
-                hi = mid
-              } else {
-                lo = mid + 1
-              }
+        // Item sorts within this page
+        if (c.compare(item, lastItem) <= 0) {
+          // Binary search for insertion point
+          let lo = 0
+          let hi = page.length
+          while (lo < hi) {
+            const mid = (lo + hi) >>> 1
+            if (c.compare(item, page[mid]) <= 0) {
+              hi = mid
+            } else {
+              lo = mid + 1
             }
-            page.splice(lo, 0, item)
-            inserted = true
-            invalidateAfter(c, pageIndex)
-            break
           }
+          page.splice(lo, 0, item)
+          c.knownIds.set(id, pageIndex)
+          surgicalShift(c, pageIndex, pageSize)
+          insertedAtIndex = pageIndex * pageSize + lo
+          inserted = true
+          break
         }
       }
 
-      if (!inserted) {
-        if (sortedPageIndices.length > 0) {
-          const firstPageIndex = sortedPageIndices[0]
-          const firstPage = c.pages.get(firstPageIndex)!
-          if (firstPage.length > 0 && c.compare(item, firstPage[0]) <= 0) {
-            firstPage.unshift(item)
-            invalidateAfter(c, firstPageIndex)
-          }
-        }
-      }
-
-      if (c.fetchCount) {
-        // Ask the server for the authoritative count (debounced)
-        debouncedFetchCount()
-      } else {
-        // Fallback: optimistic increment (may drift)
+      if (inserted) {
+        // ── Case 3: definitively new, increment immediately
         c.totalCount += 1
+
+        // Scroll correction: if the insert is at or above the first
+        // visible row, the visible content shifted down by 1 position.
+        // Use scrollTop (not visibleRange which includes overscan).
+        const scrollTop = tableRef.current?.scrollTop ?? 0
+        const firstVisibleRow = Math.floor(scrollTop / rowStride)
+        if (insertedAtIndex !== null && insertedAtIndex <= firstVisibleRow) {
+          tableRef.current?.scrollBy(rowStride)
+        }
+
+        // Trigger debounced fetchCount for drift correction
+        if (c.fetchCount) {
+          debouncedFetchCount()
+        }
+      } else {
+        // ── Case 6: falls in a gap between cached pages
+        // Determine if above or below visible range for scroll correction
+        const visibleStart = c.lastVisibleRange?.start ?? 0
+        const firstVisiblePage = Math.floor(visibleStart / pageSize)
+
+        // Check if the item would be above the visible range
+        // by checking against the first visible page's first item
+        const firstVisiblePageData = c.pages.get(firstVisiblePage)
+        if (
+          firstVisiblePageData &&
+          firstVisiblePageData.length > 0 &&
+          c.compare(item, firstVisiblePageData[0]) < 0
+        ) {
+          c.pendingAboveCount++
+        }
+
+        if (c.fetchCount) {
+          debouncedFetchCount()
+        } else {
+          c.totalCount += 1
+        }
       }
 
       rerender()
     },
-    [getItemId, rerender, debouncedFetchCount],
+    [getItemId, rerender, debouncedFetchCount, pageSize, rowStride],
   )
 
   // ── remove ─────────────────────────────────────────────────────
   const remove = useCallback(
     (id: string) => {
       const c = cacheRef.current
-      let removedFromPage: number | null = null
+      const lastKnownPage = c.knownIds.get(id)
 
       c.knownIds.delete(id)
+
+      let removedAbsoluteIndex: number | null = null
 
       for (const [pageIndex, page] of c.pages) {
         const idx = page.findIndex((item) => getItemId(item) === id)
         if (idx !== -1) {
+          removedAbsoluteIndex = pageIndex * pageSize + idx
           page.splice(idx, 1)
-          removedFromPage = pageIndex
+          surgicalPull(c, pageIndex, pageSize)
           break
         }
       }
 
       c.totalCount = Math.max(0, c.totalCount - 1)
 
-      if (removedFromPage !== null) {
-        invalidateAfter(c, removedFromPage)
+      // ── Scroll correction: was the item at or above the viewport?
+      // Use scrollTop (not visibleRange which includes overscan).
+      const scrollTop = tableRef.current?.scrollTop ?? 0
+      const firstVisibleRow = Math.floor(scrollTop / rowStride)
+
+      if (removedAbsoluteIndex !== null) {
+        // Item was on a cached page — use exact position
+        if (removedAbsoluteIndex <= firstVisibleRow) {
+          tableRef.current?.scrollBy(-rowStride)
+        }
+      } else if (lastKnownPage !== undefined && lastKnownPage >= 0) {
+        // Item was known but not on a cached page — use last-known page
+        const firstVisiblePage = Math.floor(firstVisibleRow / pageSize)
+        if (lastKnownPage < firstVisiblePage) {
+          tableRef.current?.scrollBy(-rowStride)
+        }
       }
 
       rerender()
     },
-    [getItemId, rerender],
+    [getItemId, rerender, pageSize, rowStride],
   )
 
   // ── reset ──────────────────────────────────────────────────────
@@ -398,14 +585,22 @@ export function useTableCache<T>(
       clearTimeout(c.fetchCountTimer)
       c.fetchCountTimer = null
     }
+    // Scroll back to top — the old offset is meaningless after a full reset
+    tableRef.current?.scrollTo(0)
     setIteration((iteration) => iteration + 1)
     rerender()
   }, [rerender])
 
+  const getTotalCount = useCallback(() => cacheRef.current.totalCount, [])
+
   return {
+    ref: tableRef,
+    rowHeight,
+    rowGap,
     totalCount: currentCache.totalCount,
+    getTotalCount,
     getItem,
-    handleRangeChange,
+    onRangeChange,
     upsert,
     remove,
     reset,
@@ -415,10 +610,98 @@ export function useTableCache<T>(
 
 /* ── Helpers ──────────────────────────────────────────────────── */
 
-function invalidateAfter<T>(cache: CacheState<T>, afterPageIndex: number) {
-  for (const key of cache.pages.keys()) {
-    if (key > afterPageIndex) {
-      cache.pages.delete(key)
+/**
+ * After inserting an item into a page (which now has pageSize + 1 items),
+ * cascade the overflow through subsequent contiguous cached pages.
+ * Each page pops its last item and unshifts it onto the next page.
+ * The last contiguous page is truncated to pageSize.
+ *
+ * If a gap is encountered (next page index not cached), all cached
+ * pages after the gap are invalidated (they can't be surgically fixed).
+ */
+function surgicalShift<T>(
+  cache: CacheState<T>,
+  pageIndex: number,
+  pageSize: number,
+) {
+  let currentPage = cache.pages.get(pageIndex)
+  if (!currentPage || currentPage.length <= pageSize) {
+    return
+  }
+
+  let nextIndex = pageIndex + 1
+  while (currentPage.length > pageSize) {
+    const overflow = currentPage.pop()!
+
+    const nextPage = cache.pages.get(nextIndex)
+    if (!nextPage) {
+      // No next page cached — seed one with the overflow item so
+      // getItem() can address it immediately (avoids skeleton flash).
+      // fetchPage() will re-fetch the full page when scrolling reaches it.
+      cache.pages.set(nextIndex, [overflow])
+      cache.knownIds.set(cache.getItemId(overflow), nextIndex)
+      // Invalidate any cached pages beyond the seeded page (they're shifted)
+      for (const key of cache.pages.keys()) {
+        if (key > nextIndex) {
+          cache.pages.delete(key)
+        }
+      }
+      return
     }
+
+    nextPage.unshift(overflow)
+    // Update the knownIds page index for the shifted item
+    cache.knownIds.set(cache.getItemId(overflow), nextIndex)
+
+    currentPage = nextPage
+    nextIndex++
+  }
+
+  // The last contiguous page now has pageSize + 1 items if we
+  // didn't hit a gap — truncate it
+  if (currentPage.length > pageSize) {
+    currentPage.pop()
+  }
+}
+
+/**
+ * After removing an item from a page (which now has pageSize - 1 items),
+ * pull the first item from each subsequent contiguous cached page to
+ * fill the gap. The last contiguous page shrinks by 1.
+ *
+ * If a gap is encountered (next page index not cached), all cached
+ * pages after the gap are invalidated (they can't be surgically fixed).
+ */
+function surgicalPull<T>(
+  cache: CacheState<T>,
+  pageIndex: number,
+  pageSize: number,
+) {
+  let currentPage = cache.pages.get(pageIndex)
+  if (!currentPage) {
+    return
+  }
+
+  let currentIndex = pageIndex
+  while (currentPage.length < pageSize) {
+    const nextIndex = currentIndex + 1
+    const nextPage = cache.pages.get(nextIndex)
+    if (!nextPage || nextPage.length === 0) {
+      // Gap or empty page: invalidate all cached pages after this point
+      for (const key of cache.pages.keys()) {
+        if (key > currentIndex) {
+          cache.pages.delete(key)
+        }
+      }
+      return
+    }
+
+    const pulled = nextPage.shift()!
+    currentPage.push(pulled)
+    // Update the knownIds page index for the pulled item
+    cache.knownIds.set(cache.getItemId(pulled), currentIndex)
+
+    currentPage = nextPage
+    currentIndex = nextIndex
   }
 }

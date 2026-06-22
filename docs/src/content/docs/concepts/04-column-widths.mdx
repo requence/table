@@ -85,6 +85,7 @@ function UserTable() {
 
   const cache = useTableCache('users', {
     pageSize: 50,
+    rowHeight: 40,
     getItemId: (user) => user.id,
     compare: (a, b) => a.name.localeCompare(b.name),
     fetchItems: async (offset, limit) => {
@@ -103,9 +104,8 @@ function UserTable() {
       </div>
 
       <VirtualTable
-        totalCount={cache.totalCount}
+        {...cache}
         rowHeight={40}
-        onRangeChange={cache.handleRangeChange}
         className="h-[600px]"
       >
         <VirtualTable.Header className="bg-zinc-900 text-sm text-zinc-400">

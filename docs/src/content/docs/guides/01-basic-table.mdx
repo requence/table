@@ -46,16 +46,21 @@ This guide walks you through building a complete paginated table with `@requence
    function UserTable() {
      const cache = useTableCache<User>('users', {
        pageSize: 50,
+       rowHeight: 40,
        getItemId: (user) => user.id,
        compare: (a, b) => a.name.localeCompare(b.name),
        fetchItems: fetchUsers,
      })
 
-     // cache.totalCount — total rows
-     // cache.getItem(index) — get row by index (undefined if not fetched)
-     // cache.handleRangeChange — pass to VirtualTable.onRangeChange
+      // Spread cache onto VirtualTable: {...cache}
+      // This passes ref, totalCount, onRangeChange, rowHeight, and rowGap automatically
+      // cache.getItem(index) — get row by index (undefined if not fetched)
    }
    ```
+
+   :::tip
+   `useTableCache` returns `rowHeight` and `rowGap` alongside `ref`, `totalCount`, and `onRangeChange`, so spreading `{...cache}` onto `<VirtualTable>` wires up all required props in one go — no need to pass `rowHeight` separately.
+   :::
 
    :::note
    Wrap the component in `<Suspense fallback={...}>` — the first page fetch will suspend the component.
@@ -70,9 +75,7 @@ This guide walks you through building a complete paginated table with `@requence
 
    return (
      <VirtualTable
-       totalCount={cache.totalCount}
-       rowHeight={40}
-       onRangeChange={cache.handleRangeChange}
+       {...cache}
        className="h-[600px]"
        aria-label="Users"
      >
@@ -202,6 +205,7 @@ function UserTable() {
 
   const cache = useTableCache<User>('users', {
     pageSize: 50,
+    rowHeight: 40,
     getItemId: (user) => user.id,
     compare: (a, b) => a.name.localeCompare(b.name),
     fetchItems: fetchUsers,
@@ -217,9 +221,7 @@ function UserTable() {
       </div>
 
       <VirtualTable
-        totalCount={cache.totalCount}
-        rowHeight={40}
-        onRangeChange={cache.handleRangeChange}
+        {...cache}
         className="h-[600px]"
         aria-label="Users"
       >

@@ -4,32 +4,79 @@ import {
   type ComponentProps,
   type ReactElement,
   type ReactNode,
+  forwardRef,
   isValidElement,
   useCallback,
   useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
   useRef,
   useState,
 } from 'react'
 import { flushSync } from 'react-dom'
 import { twMerge } from 'tailwind-merge'
+import { useSmoothScroll, type SmoothScrollConfig } from './useSmoothScroll.js'
 
 /* ── Types ──────────────────────────────────────────────────────── */
 
-export interface VirtualTableProps {
+/** Imperative handle exposed by VirtualTable via ref. */
+export interface VirtualTableHandle {
+  /** Current scroll position in pixels. */
+  readonly scrollTop: number
+  /** Scroll to an absolute pixel offset. */
+  scrollTo: (px: number) => void
+  /** Adjust the scroll position by the given number of pixels. */
+  scrollBy: (px: number) => void
+}
+
+export interface VirtualTableProps<
+  TExtras extends Record<string, unknown> = {},
+> {
   /** Total number of rows in the dataset */
   totalCount: number
   /** Fixed height of each row in pixels */
   rowHeight: number
+  /** Gap between rows in pixels (default: 0) */
+  rowGap?: number
   /** Number of extra rows rendered above/below viewport (default: 5) */
   overscan?: number
+  /**
+   * Whether the imperative `scrollBy` handle adjusts scroll position.
+   * Set to `false` to disable automatic scroll correction from the cache.
+   * Default: `true`.
+   */
+  adjustScrollPosition?: boolean
+  /**
+   * Enable rAF-based lerp interpolation for mouse-wheel scrolling.
+   * Useful for browsers (e.g. Safari) that don't natively smooth
+   * discrete wheel deltas.
+   * Pass `true` for defaults, `false` to disable, or a config object
+   * to customise `{ lerp, epsilon }`.
+   * Default: `true`.
+   */
+  smoothScroll?: boolean | SmoothScrollConfig
   /** Called when the visible row range changes (for triggering page fetches) */
   onRangeChange?: (range: { start: number; end: number }) => void
-  /** Additional className for the outer container */
-  className?: string
+  /** Called on every scroll event with the current scroll position and total scrollable height */
+  onScroll?: (scrollTop: number, scrollHeight: number) => void
+  /**
+   * Additional className for the outer container.
+   * Can be a string or a callback that receives the parsed column definitions.
+   */
+  className?:
+    | string
+    | ((columns: ReadonlyArray<VirtualTableColumnDef<TExtras>>) => string)
   /** Accessible label for the table */
   'aria-label'?: string
-  /** Additional inline styles for the outer container */
-  style?: CSSProperties
+  /**
+   * Additional inline styles for the outer container.
+   * Can be a CSSProperties object or a callback that receives the parsed column definitions.
+   */
+  style?:
+    | CSSProperties
+    | ((
+        columns: ReadonlyArray<VirtualTableColumnDef<TExtras>>,
+      ) => CSSProperties)
   children: ReactNode
 }
 
@@ -49,8 +96,7 @@ export interface VirtualTableColumnProps {
   minWidth?: number
   /** Maximum width in pixels during resize */
   maxWidth?: number
-  /** Mark this column as transparent — the row background will not extend behind it. */
-  transparent?: boolean
+
   /** Called when a resize drag starts */
   onResizeStart?: () => void
   /** Called when a resize drag ends with the final pixel width, original width, and equivalent fr value */
@@ -83,22 +129,26 @@ export interface VirtualTableFooterProps {
   children: (range: { start: number; end: number }) => ReactNode
 }
 
-/* ── Internal types ─────────────────────────────────────────────── */
+/* ── Column definition (public) ─────────────────────────────────── */
 
-interface ColumnDef {
+/** Parsed column definition exposed to className/style callbacks. */
+export type VirtualTableColumnDef<
+  TExtras extends Record<string, unknown> = {},
+> = {
   width?: number | string
   header?: ReactNode
   className?: string
   resizable?: boolean
   minWidth?: number
   maxWidth?: number
-  transparent?: boolean
   onResizeStart?: () => void
   onResizeEnd?: (width: number, startWidth: number, frValue: number) => void
-}
+} & TExtras
+
+/* ── Internal types ─────────────────────────────────────────────── */
 
 interface Slots {
-  header: { className?: string; columns: ColumnDef[] } | null
+  header: { className?: string; columns: VirtualTableColumnDef[] } | null
   body: VirtualTableBodyProps | null
   skeletonRow: VirtualTableSkeletonRowProps | null
   empty: VirtualTableEmptyProps | null
@@ -126,9 +176,9 @@ export function createTableHeader(
   return asSlot('header', defaults)
 }
 
-export function createTableColumn(
-  defaults?: Partial<VirtualTableColumnProps>,
-): SlotComponent<VirtualTableColumnProps> {
+export function createTableColumn<TExtras extends Record<string, unknown> = {}>(
+  defaults?: Partial<VirtualTableColumnProps & TExtras>,
+): SlotComponent<VirtualTableColumnProps & TExtras> {
   return asSlot('column', defaults)
 }
 
@@ -169,7 +219,7 @@ const GRID_VAR_REF = `var(${GRID_VAR})`
 
 /* ── Helpers ────────────────────────────────────────────────────── */
 
-function buildGridTemplate(columns: ColumnDef[]): string {
+function buildGridTemplate(columns: VirtualTableColumnDef[]): string {
   return columns
     .map((col) => {
       if (typeof col.width === 'number') {
@@ -214,21 +264,42 @@ function extractSlots(children: ReactNode): Slots {
     if (slotIs(child, 'header')) {
       const defaults = (child.type as any).slotDefaults ?? {}
       const props = child.props as VirtualTableHeaderProps
-      const columns: ColumnDef[] = []
+      const columns: VirtualTableColumnDef[] = []
       Children.forEach(props.children, (col) => {
         if (isValidElement(col) && slotIs(col, 'column')) {
           const d = (col.type as any).slotDefaults ?? {}
-          const p = col.props as VirtualTableColumnProps
+          const {
+            width,
+            children: colChildren,
+            className: colClassName,
+            resizable,
+            minWidth,
+            maxWidth,
+            onResizeStart,
+            onResizeEnd,
+            ...pExtras
+          } = col.props as VirtualTableColumnProps & Record<string, unknown>
+          const {
+            width: dw,
+            className: dc,
+            resizable: dr,
+            minWidth: dmin,
+            maxWidth: dmax,
+            onResizeStart: drs,
+            onResizeEnd: dre,
+            ...dExtras
+          } = d
           columns.push({
-            width: p.width ?? d.width,
-            header: p.children,
-            className: twMerge(d.className as string, p.className),
-            resizable: p.resizable ?? d.resizable,
-            minWidth: p.minWidth ?? d.minWidth,
-            maxWidth: p.maxWidth ?? d.maxWidth,
-            transparent: p.transparent ?? d.transparent,
-            onResizeStart: p.onResizeStart ?? d.onResizeStart,
-            onResizeEnd: p.onResizeEnd ?? d.onResizeEnd,
+            ...dExtras,
+            ...pExtras,
+            width: width ?? dw,
+            header: colChildren,
+            className: twMerge(dc as string, colClassName),
+            resizable: resizable ?? dr,
+            minWidth: minWidth ?? dmin,
+            maxWidth: maxWidth ?? dmax,
+            onResizeStart: onResizeStart ?? drs,
+            onResizeEnd: onResizeEnd ?? dre,
           })
         }
       })
@@ -314,47 +385,229 @@ function VirtualTableCell({
 interface DataRowProps {
   index: number
   rowHeight: number
+  rowStride: number
   rowProps: ComponentProps<'div'>
   children: ReactNode
 }
 
-function DataRow({ index, rowHeight, rowProps, children }: DataRowProps) {
+function DataRow({ index, rowHeight, rowStride, rowProps, children }: DataRowProps) {
   const { className, style, ...restProps } = rowProps
   return (
     <div
-      role="row"
-      aria-rowindex={index + 1}
-      className={twMerge('group/row absolute w-full', className)}
+      className="absolute w-full will-change-transform [contain:layout_style_paint]"
       style={{
         height: rowHeight,
-        transform: `translateY(${index * rowHeight}px)`,
-        display: 'grid',
-        gridTemplateColumns: GRID_VAR_REF,
-        alignItems: 'center',
-        willChange: 'transform',
-        contain: 'layout style paint',
-        ...style,
+        transform: `translateY(${index * rowStride}px)`,
       }}
-      {...restProps}
     >
-      {children}
+      <div
+        role="row"
+        aria-rowindex={index + 1}
+        className={twMerge('group/row h-full grid items-center', className)}
+        style={{
+          gridTemplateColumns: GRID_VAR_REF,
+          ...style,
+        }}
+        {...restProps}
+      >
+        {children}
+      </div>
     </div>
   )
 }
 
+/* ── Skeleton → SVG background snapshot ────────────────────────── */
+
+/**
+ * CSS properties inlined into the SVG snapshot.  Kept minimal to
+ * produce a small data-URL while still capturing all visual detail.
+ */
+const SNAPSHOT_CSS_PROPS: string[] = [
+  // Box model & layout
+  'display',
+  'position',
+  'top',
+  'right',
+  'bottom',
+  'left',
+  'width',
+  'height',
+  'min-width',
+  'max-width',
+  'min-height',
+  'max-height',
+  'margin',
+  'padding',
+  'box-sizing',
+  // Grid
+  'grid-template-columns',
+  'grid-column',
+  'align-items',
+  'gap',
+  // Visual
+  'background',
+  'background-color',
+  'border',
+  'border-radius',
+  'opacity',
+  'overflow',
+  'z-index',
+  // Text (in case skeleton cells contain text placeholders)
+  'color',
+  'font-size',
+  'font-family',
+  'font-weight',
+  'line-height',
+]
+
+/**
+ * Materialise a `::before` or `::after` pseudo-element as a real
+ * `<div>` and insert it into `target`.  This is necessary because
+ * `cloneNode` does not capture pseudo-elements.
+ */
+function materializePseudo(
+  source: Element,
+  target: HTMLElement,
+  pseudo: '::before' | '::after',
+): void {
+  const ps = getComputedStyle(source, pseudo)
+  const content = ps.getPropertyValue('content')
+  // Skip if the pseudo doesn't exist
+  if (content === 'none' || content === 'normal') {
+    return
+  }
+
+  // Skip if it has no visible paint (transparent bg + no border)
+  const bg = ps.getPropertyValue('background-color')
+  const border = ps.getPropertyValue('border')
+  const isTransparent = !bg || bg === 'rgba(0, 0, 0, 0)' || bg === 'transparent'
+  const noBorder = !border || border.startsWith('0px')
+  if (isTransparent && noBorder) {
+    return
+  }
+
+  const el = document.createElement('div')
+  el.dataset.pseudo = pseudo // tag so child-filter can skip it
+  for (const prop of SNAPSHOT_CSS_PROPS) {
+    const v = ps.getPropertyValue(prop)
+    if (v) {
+      el.style.setProperty(prop, v)
+    }
+  }
+  if (pseudo === '::before') {
+    target.insertBefore(el, target.firstChild)
+  } else {
+    target.appendChild(el)
+  }
+}
+
+/** Recursively inline computed styles from `source` onto `target`. */
+function inlineComputedStyles(source: Element, target: Element): void {
+  if (!(source instanceof HTMLElement) || !(target instanceof HTMLElement)) {
+    return
+  }
+
+  const computed = getComputedStyle(source)
+  target.removeAttribute('class') // classes won't resolve inside SVG
+  target.removeAttribute('style')
+  for (const prop of SNAPSHOT_CSS_PROPS) {
+    const v = computed.getPropertyValue(prop)
+    if (v) {
+      target.style.setProperty(prop, v)
+    }
+  }
+
+  // Pseudo-elements can't be cloned — materialise them as real nodes
+  materializePseudo(source, target, '::before')
+  materializePseudo(source, target, '::after')
+
+  // Recurse into original children (skip any pseudo nodes we just added)
+  const srcChildren = source.children
+  const tgtChildren = Array.from(target.children).filter(
+    (c) => !(c as HTMLElement).dataset?.pseudo,
+  )
+  for (let i = 0; i < srcChildren.length && i < tgtChildren.length; i++) {
+    inlineComputedStyles(srcChildren[i]!, tgtChildren[i]!)
+  }
+}
+
+/**
+ * Capture an element as an SVG data-URL that can be used as a CSS
+ * `background-image`.  External styles are inlined and pseudo-elements
+ * are materialised so the snapshot is self-contained.
+ */
+function domToSvgDataUrl(
+  source: Element,
+  width: number,
+  height: number,
+): string {
+  const clone = source.cloneNode(true) as HTMLElement
+  inlineComputedStyles(source, clone)
+  clone.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml')
+
+  const html = new XMLSerializer().serializeToString(clone)
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">` +
+    `<foreignObject width="100%" height="100%">${html}</foreignObject>` +
+    '</svg>'
+
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+}
+
 /* ── VirtualTable ──────────────────────────────────────────────── */
 
-function VirtualTableRoot({
-  totalCount,
-  rowHeight,
-  overscan = 5,
-  onRangeChange,
-  className,
-  style: styleProp,
-  'aria-label': ariaLabel,
-  children,
-}: VirtualTableProps) {
+function VirtualTableInner<TExtras extends Record<string, unknown> = {}>(
+  {
+    totalCount,
+    rowHeight,
+    rowGap = 0,
+    overscan = 5,
+    adjustScrollPosition = true,
+    smoothScroll = true,
+    onRangeChange,
+    onScroll: onScrollProp,
+    className,
+    style: styleProp,
+    'aria-label': ariaLabel,
+    children,
+  }: VirtualTableProps<TExtras>,
+  ref: React.ForwardedRef<VirtualTableHandle>,
+) {
   const scrollRef = useRef<HTMLDivElement>(null)
+  const rowgroupRef = useRef<HTMLDivElement>(null)
+  const skeletonCaptureRef = useRef<HTMLDivElement>(null)
+
+  // rAF lerp smooth scrolling (e.g. for Safari mouse-wheel)
+  const cancelSmoothScroll = useSmoothScroll(scrollRef, smoothScroll)
+
+  // Track the prop in a ref so the imperative handle (stable identity)
+  // always reads the current value without being recreated.
+  const adjustRef = useRef(adjustScrollPosition)
+  adjustRef.current = adjustScrollPosition
+
+  // Keep cancel in a ref so the stable imperative handle can access it
+  const cancelSmoothScrollRef = useRef(cancelSmoothScroll)
+  cancelSmoothScrollRef.current = cancelSmoothScroll
+
+  // ── Imperative handle ────────────────────────────────────────
+  useImperativeHandle(
+    ref,
+    () => ({
+      get scrollTop() {
+        return scrollRef.current?.scrollTop ?? 0
+      },
+      scrollTo: (px: number) => {
+        cancelSmoothScrollRef.current()
+        scrollRef.current?.scrollTo({ top: px })
+      },
+      scrollBy: (px: number) => {
+        if (adjustRef.current && scrollRef.current) {
+          scrollRef.current.scrollTop += px
+        }
+      },
+    }),
+    [],
+  )
   const [visibleRange, setVisibleRange] = useState({ start: 0, end: 0 })
   const prevRangeRef = useRef({ start: 0, end: 0 })
 
@@ -363,18 +616,28 @@ function VirtualTableRoot({
   const gridTemplate = buildGridTemplate(columns)
   const renderRow = body?.children ?? (() => null)
 
-  // ── Scroll handler (synchronous for flicker-free scrolling) ────
-  const calculateRange = useCallback(() => {
+  // Resolve callback-form className / style
+  const typedColumns = columns as unknown as ReadonlyArray<
+    VirtualTableColumnDef<TExtras>
+  >
+  const resolvedClassName =
+    typeof className === 'function' ? className(typedColumns) : className
+  const resolvedStyle =
+    typeof styleProp === 'function' ? styleProp(typedColumns) : styleProp
+
+  // ── Range computation (pure, no state updates) ─────────────────
+  const computeRange = useCallback(() => {
     const el = scrollRef.current
     if (!el || totalCount === 0) {
-      return
+      return null
     }
 
     const scrollTop = el.scrollTop
     const viewportHeight = el.clientHeight
 
-    const rawStart = Math.floor(scrollTop / rowHeight)
-    const rawEnd = Math.ceil((scrollTop + viewportHeight) / rowHeight)
+    const stride = rowHeight + rowGap
+    const rawStart = Math.floor(scrollTop / stride)
+    const rawEnd = Math.ceil((scrollTop + viewportHeight) / stride)
 
     const start = Math.max(0, rawStart - overscan)
     const end = Math.min(totalCount, rawEnd + overscan)
@@ -382,18 +645,97 @@ function VirtualTableRoot({
     const prev = prevRangeRef.current
     if (prev.start !== start || prev.end !== end) {
       prevRangeRef.current = { start, end }
-      flushSync(() => setVisibleRange({ start, end }))
+      return { start, end }
     }
-  }, [totalCount, rowHeight, overscan])
+    return null
+  }, [totalCount, rowHeight, rowGap, overscan])
 
+  // ── Scroll handler (synchronous for flicker-free scrolling) ────
   const handleScroll = useCallback(() => {
-    calculateRange()
-  }, [calculateRange])
+    const el = scrollRef.current
+    if (el) {
+      onScrollProp?.(el.scrollTop, el.scrollHeight)
+    }
+    const range = computeRange()
+    if (range) {
+      flushSync(() => setVisibleRange(range))
+    }
+  }, [computeRange, onScrollProp])
+
+  // ── Skeleton background snapshot ───────────────────────────────
+  const hasSkeletonSlot = !!skeletonRow
+  useLayoutEffect(() => {
+    const rowgroup = rowgroupRef.current
+    const capture = skeletonCaptureRef.current
+    if (!rowgroup || !capture || !hasSkeletonSlot) {
+      return
+    }
+
+    const applyBackground = () => {
+      const source = capture.firstElementChild
+      if (!source) {
+        return
+      }
+      const width = capture.clientWidth
+      if (width === 0) {
+        return
+      }
+
+      const stride = rowHeight + rowGap
+      const url = domToSvgDataUrl(source, width, stride)
+      rowgroup.style.backgroundImage = `url("${url}")`
+      rowgroup.style.backgroundSize = `100% ${stride}px`
+      rowgroup.style.backgroundRepeat = 'repeat-y'
+    }
+
+    // Initial capture (runs before first paint via useLayoutEffect)
+    applyBackground()
+
+    // Re-capture when container width changes (window resize).
+    // Height changes (from totalCount) are ignored via width guard.
+    let lastWidth = rowgroup.clientWidth
+    const resizeObs = new ResizeObserver(() => {
+      const w = rowgroup.clientWidth
+      if (w !== lastWidth) {
+        lastWidth = w
+        applyBackground()
+      }
+    })
+    resizeObs.observe(rowgroup)
+
+    return () => {
+      resizeObs.disconnect()
+      rowgroup.style.backgroundImage = ''
+      rowgroup.style.backgroundSize = ''
+      rowgroup.style.backgroundRepeat = ''
+    }
+    // gridTemplate changes after column resize (mouseup), not during drag
+  }, [rowHeight, rowGap, hasSkeletonSlot, gridTemplate])
 
   // Recalculate on totalCount/rowHeight changes
   useEffect(() => {
-    calculateRange()
-  }, [calculateRange])
+    const range = computeRange()
+    if (range) {
+      setVisibleRange(range)
+    }
+  }, [computeRange])
+
+  // Recalculate when the scroll container is resized (e.g. browser
+  // height change).  A resize doesn't fire a scroll event, so the
+  // visible range would go stale without this.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+
+    const observer = new ResizeObserver(() => {
+      const range = computeRange()
+      if (range) {
+        setVisibleRange(range)
+      }
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [computeRange])
 
   // Notify consumer when visible range changes
   useEffect(() => {
@@ -498,8 +840,8 @@ function VirtualTableRoot({
       <div
         role="table"
         aria-label={ariaLabel}
-        className={twMerge('flex flex-col overflow-hidden', className)}
-        style={{ [GRID_VAR]: gridTemplate, ...styleProp } as CSSProperties}
+        className={twMerge('flex flex-col overflow-hidden', resolvedClassName)}
+        style={{ [GRID_VAR]: gridTemplate, ...resolvedStyle } as CSSProperties}
       >
         {/* Header */}
         <div
@@ -508,10 +850,9 @@ function VirtualTableRoot({
         >
           <div
             role="row"
+            className="grid items-center"
             style={{
-              display: 'grid',
               gridTemplateColumns: GRID_VAR_REF,
-              alignItems: 'center',
               height: rowHeight,
             }}
           >
@@ -561,6 +902,7 @@ function VirtualTableRoot({
             key={`row-${i}`}
             index={i}
             rowHeight={rowHeight}
+            rowStride={rowHeight + rowGap}
             rowProps={skeletonProps}
           >
             {skeletonContent}
@@ -586,6 +928,7 @@ function VirtualTableRoot({
           key={`row-${i}`}
           index={i}
           rowHeight={rowHeight}
+          rowStride={rowHeight + rowGap}
           rowProps={rowProps}
         >
           {cellContent}
@@ -594,7 +937,7 @@ function VirtualTableRoot({
     }
   }
 
-  const totalHeight = totalCount * rowHeight
+  const totalHeight = totalCount > 0 ? totalCount * (rowHeight + rowGap) - rowGap : 0
 
   return (
     <>
@@ -604,8 +947,8 @@ function VirtualTableRoot({
         aria-rowcount={totalCount}
         ref={scrollRef}
         onScroll={handleScroll}
-        className={twMerge('relative overflow-auto', className)}
-        style={{ [GRID_VAR]: gridTemplate, ...styleProp } as CSSProperties}
+        className={twMerge('relative overflow-auto', resolvedClassName)}
+        style={{ [GRID_VAR]: gridTemplate, ...resolvedStyle } as CSSProperties}
       >
         {/* Header */}
         <div
@@ -614,10 +957,9 @@ function VirtualTableRoot({
         >
           <div
             role="row"
+            className="grid items-center"
             style={{
-              display: 'grid',
               gridTemplateColumns: GRID_VAR_REF,
-              alignItems: 'center',
             }}
           >
             {columns.map((col, i) => (
@@ -643,10 +985,32 @@ function VirtualTableRoot({
 
         {/* Body sentinel + visible rows */}
         <div
+          ref={rowgroupRef}
           role="rowgroup"
           className="relative"
           style={{ height: totalHeight }}
         >
+          {/* Hidden skeleton row used as capture source for the
+              repeating SVG background (visibility: hidden still
+              participates in layout so getComputedStyle works). */}
+          {skeletonRow && (
+            <div
+              ref={skeletonCaptureRef}
+              aria-hidden
+              className="absolute top-0 left-0 w-full invisible pointer-events-none"
+            >
+              <div
+                className={twMerge('grid items-center', skeletonRow.className)}
+                style={{
+                  height: rowHeight,
+                  gridTemplateColumns: GRID_VAR_REF,
+                }}
+              >
+                {skeletonRow.children}
+              </div>
+            </div>
+          )}
+
           {rows}
         </div>
       </div>
@@ -661,13 +1025,22 @@ function VirtualTableRoot({
 
 /* ── Compound export ───────────────────────────────────────────── */
 
-export const VirtualTable = Object.assign(VirtualTableRoot, {
-  Header: VirtualTableHeader,
-  Column: VirtualTableColumn,
-  Body: VirtualTableBody,
-  SkeletonRow: VirtualTableSkeletonRow,
-  Row: VirtualTableRow,
-  Cell: VirtualTableCell,
-  Empty: VirtualTableEmpty,
-  Footer: VirtualTableFooter,
-})
+export const VirtualTable = Object.assign(
+  forwardRef(VirtualTableInner) as <
+    TExtras extends Record<string, unknown> = {},
+  >(
+    props: VirtualTableProps<TExtras> & {
+      ref?: React.Ref<VirtualTableHandle>
+    },
+  ) => ReactElement | null,
+  {
+    Header: VirtualTableHeader,
+    Column: VirtualTableColumn,
+    Body: VirtualTableBody,
+    SkeletonRow: VirtualTableSkeletonRow,
+    Row: VirtualTableRow,
+    Cell: VirtualTableCell,
+    Empty: VirtualTableEmpty,
+    Footer: VirtualTableFooter,
+  },
+)

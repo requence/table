@@ -3,6 +3,8 @@
 @import '@astrojs/starlight-tailwind';
 @import 'tailwindcss/theme.css' layer(theme);
 @import 'tailwindcss/utilities.css' layer(utilities);
+@source '../../../example/src/TableDemo.tsx';
+@source '../../../src/VirtualTable.tsx';
 
 /* ── Theme ────────────────────────────────────────────────────────────── */
 
@@ -100,7 +102,8 @@
     @apply bg-orange-500/30;
   }
 
-  html, body {
+  html,
+  body {
     @apply bg-zinc-900;
   }
 
@@ -175,7 +178,7 @@ header.header .sl-flex:not(.title-wrapper):not(.right-group) {
 }
 
 .site-title img {
-  @apply w-auto h-4 translate-y-[3px];
+  @apply w-auto h-4 translate-y-0.75;
 }
 
 /* ── Sidebar ──────────────────────────────────────────────────────────── */
@@ -303,32 +306,72 @@ nav.sidebar a[aria-current='true'] {
 }
 
 .hero .actions a.sl-link-button.primary {
-  border-color: color-mix(in srgb, var(--color-orange-400) 50%, transparent) !important;
-  background-color: color-mix(in srgb, var(--color-orange-950) 30%, transparent) !important;
+  border-color: color-mix(
+    in srgb,
+    var(--color-orange-400) 50%,
+    transparent
+  ) !important;
+  background-color: color-mix(
+    in srgb,
+    var(--color-orange-950) 30%,
+    transparent
+  ) !important;
   color: var(--color-orange-400) !important;
 }
 .hero .actions a.sl-link-button.primary:hover {
-  border-color: color-mix(in srgb, var(--color-orange-400) 80%, transparent) !important;
+  border-color: color-mix(
+    in srgb,
+    var(--color-orange-400) 80%,
+    transparent
+  ) !important;
 }
 .hero .actions a.sl-link-button.primary:active {
-  border-color: color-mix(in srgb, var(--color-orange-400) 80%, transparent) !important;
-  background-color: color-mix(in srgb, var(--color-orange-950) 40%, transparent) !important;
+  border-color: color-mix(
+    in srgb,
+    var(--color-orange-400) 80%,
+    transparent
+  ) !important;
+  background-color: color-mix(
+    in srgb,
+    var(--color-orange-950) 40%,
+    transparent
+  ) !important;
 }
 
 .hero .actions a.sl-link-button.minimal,
 .hero .actions a.sl-link-button.secondary {
-  border-color: color-mix(in srgb, var(--color-zinc-400) 50%, transparent) !important;
-  background-color: color-mix(in srgb, var(--color-zinc-800) 30%, transparent) !important;
+  border-color: color-mix(
+    in srgb,
+    var(--color-zinc-400) 50%,
+    transparent
+  ) !important;
+  background-color: color-mix(
+    in srgb,
+    var(--color-zinc-800) 30%,
+    transparent
+  ) !important;
   color: var(--color-zinc-200) !important;
 }
 .hero .actions a.sl-link-button.minimal:hover,
 .hero .actions a.sl-link-button.secondary:hover {
-  border-color: color-mix(in srgb, var(--color-zinc-400) 80%, transparent) !important;
+  border-color: color-mix(
+    in srgb,
+    var(--color-zinc-400) 80%,
+    transparent
+  ) !important;
 }
 .hero .actions a.sl-link-button.minimal:active,
 .hero .actions a.sl-link-button.secondary:active {
-  border-color: color-mix(in srgb, var(--color-zinc-400) 80%, transparent) !important;
-  background-color: color-mix(in srgb, var(--color-zinc-800) 60%, transparent) !important;
+  border-color: color-mix(
+    in srgb,
+    var(--color-zinc-400) 80%,
+    transparent
+  ) !important;
+  background-color: color-mix(
+    in srgb,
+    var(--color-zinc-800) 60%,
+    transparent
+  ) !important;
 }
 
 /* ── Pagination links (prev/next) ─────────────────────────────────────── */
@@ -361,26 +404,58 @@ nav.sidebar a[aria-current='true'] {
 }
 
 .starlight-aside--note {
-  background-color: color-mix(in srgb, var(--color-blue-950) 30%, transparent) !important;
-  border-color: color-mix(in srgb, var(--color-blue-400) 40%, transparent) !important;
+  background-color: color-mix(
+    in srgb,
+    var(--color-blue-950) 30%,
+    transparent
+  ) !important;
+  border-color: color-mix(
+    in srgb,
+    var(--color-blue-400) 40%,
+    transparent
+  ) !important;
   --sl-color-asides-text-accent: var(--color-blue-300) !important;
 }
 
 .starlight-aside--tip {
-  background-color: color-mix(in srgb, var(--color-green-950) 30%, transparent) !important;
-  border-color: color-mix(in srgb, var(--color-green-400) 40%, transparent) !important;
+  background-color: color-mix(
+    in srgb,
+    var(--color-green-950) 30%,
+    transparent
+  ) !important;
+  border-color: color-mix(
+    in srgb,
+    var(--color-green-400) 40%,
+    transparent
+  ) !important;
   --sl-color-asides-text-accent: var(--color-green-300) !important;
 }
 
 .starlight-aside--caution {
-  background-color: color-mix(in srgb, var(--color-yellow-950) 30%, transparent) !important;
-  border-color: color-mix(in srgb, var(--color-yellow-400) 50%, transparent) !important;
+  background-color: color-mix(
+    in srgb,
+    var(--color-yellow-950) 30%,
+    transparent
+  ) !important;
+  border-color: color-mix(
+    in srgb,
+    var(--color-yellow-400) 50%,
+    transparent
+  ) !important;
   --sl-color-asides-text-accent: var(--color-yellow-400) !important;
 }
 
 .starlight-aside--danger {
-  background-color: color-mix(in srgb, var(--color-red-950) 30%, transparent) !important;
-  border-color: color-mix(in srgb, var(--color-red-400) 50%, transparent) !important;
+  background-color: color-mix(
+    in srgb,
+    var(--color-red-950) 30%,
+    transparent
+  ) !important;
+  border-color: color-mix(
+    in srgb,
+    var(--color-red-400) 50%,
+    transparent
+  ) !important;
   --sl-color-asides-text-accent: var(--color-red-300) !important;
 }
 
@@ -462,4 +537,21 @@ site-search button[data-open-modal] kbd {
   color: var(--color-zinc-500) !important;
   font-size: 0.75rem !important;
   box-shadow: none !important;
+}
+
+/* ── Live Demo Layout ────────────────────────────────────────────────── */
+body:has(.demo-container) .content-panel:has(> .sl-container > h1#_top),
+body:has(.demo-container) footer {
+  display: none;
+}
+
+.sl-container:has(.demo-container) {
+  max-width: 100%;
+}
+
+.demo-container {
+  height: calc(100dvh - var(--sl-nav-height) - 8rem);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }

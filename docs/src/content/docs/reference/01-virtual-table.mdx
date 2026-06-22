@@ -53,12 +53,58 @@ import { VirtualTable } from '@requence/table'
 |---|---|---|---|
 | `totalCount` | `number` | — | **Required.** Total number of rows in the dataset. |
 | `rowHeight` | `number` | — | **Required.** Fixed height of each row in pixels. |
+| `rowGap` | `number` | `0` | Gap between rows in pixels. When set, rows are spaced `rowHeight + rowGap` pixels apart while each row remains `rowHeight` tall. The gap area is transparent, showing the container background. |
 | `overscan` | `number` | `5` | Number of extra rows rendered above and below the viewport. |
-| `onRangeChange` | `(range: { start: number; end: number }) => void` | — | Called when the visible row range changes. Wire this to `useTableCache().handleRangeChange` to trigger page fetches. |
-| `className` | `string` | — | Additional class name for the outer container. |
-| `style` | `CSSProperties` | — | Additional inline styles for the outer container. |
+| `onRangeChange` | `(range: { start: number; end: number }) => void` | — | Called when the visible row range changes. Use this to trigger data fetches for the newly visible indices. |
+| `className` | `string \| ((columns) => string)` | — | Additional class name for the outer container. Can be a callback that receives the parsed column definitions. |
+| `style` | `CSSProperties \| ((columns) => CSSProperties)` | — | Additional inline styles for the outer container. Can be a callback that receives the parsed column definitions. |
 | `aria-label` | `string` | — | Accessible label for the table element. |
 | `children` | `ReactNode` | — | Sub-components (Header, Body, SkeletonRow, Empty, Footer). |
+| `adjustScrollPosition` | `boolean` | `true` | Whether the imperative `scrollBy` handle adjusts scroll position. Set to `false` to disable programmatic scroll correction. |
+| `smoothScroll` | `boolean \| SmoothScrollConfig` | `true` | Enable rAF-based lerp interpolation for mouse-wheel scrolling. Pass `true` for defaults, `false` to disable, or `{ lerp?, epsilon? }` to customise. See [SmoothScrollConfig](#smoothscrollconfig). |
+| `onScroll` | `(scrollTop: number, scrollHeight: number) => void` | — | Called on every scroll event with the current scroll position and total scrollable height. |
+| `ref` | `React.Ref<VirtualTableHandle>` | — | Ref to access the imperative handle. See [VirtualTableHandle](#virtualtablehandle). |
+
+`VirtualTable` accepts an optional generic type parameter that flows through to the column definitions received by `className` and `style` callbacks:
+
+```tsx
+<VirtualTable<{ transparent?: boolean }>
+  style={(columns) => {
+    // columns[n].transparent is typed as boolean | undefined
+    const inset = columns
+      .filter((c) => c.transparent)
+      .reduce((sum, c) => sum + (typeof c.width === 'number' ? c.width : 0), 0)
+    return { '--row-bg-inset': `${inset}px` } as CSSProperties
+  }}
+>
+```
+
+## VirtualTableHandle
+
+The imperative handle exposed via `ref`. Useful for programmatic scroll correction when items are added or removed above the viewport.
+
+```typescript
+import type { VirtualTableHandle } from '@requence/table'
+```
+
+| Property | Type | Description |
+|---|---|---|
+| `scrollTop` | `number` (readonly) | Current scroll position in pixels. |
+| `scrollTo` | `(px: number) => void` | Scroll to an absolute pixel offset. Cancels any in-flight smooth-scroll animation. |
+| `scrollBy` | `(px: number) => void` | Adjust the scroll position by the given number of pixels. Gated by the `adjustScrollPosition` prop. |
+
+## SmoothScrollConfig
+
+Configuration object for the `smoothScroll` prop. All fields are optional.
+
+```typescript
+import type { SmoothScrollConfig } from '@requence/table'
+```
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `lerp` | `number` | `0.08` | Lerp factor per frame — higher values feel snappier, lower values produce a smoother glide. |
+| `epsilon` | `number` | `0.5` | Stop threshold in pixels — the animation stops when the remaining distance is below this value. |
 
 ## Sub-Components
 
@@ -82,7 +128,6 @@ Defines a single column's width and header content.
 | `resizable` | `boolean` | `false` | Whether the column can be resized by dragging a handle on its right edge. |
 | `minWidth` | `number` | `50` | Minimum width in pixels during resize. |
 | `maxWidth` | `number` | — | Maximum width in pixels during resize. |
-| `transparent` | `boolean` | — | Marks the column as transparent — the row background will not extend behind it. Useful for action columns that sit outside the visual row. |
 | `onResizeStart` | `() => void` | — | Called when a resize drag starts. |
 | `onResizeEnd` | `(width: number, startWidth: number, frValue: number) => void` | — | Called when a resize drag ends. See [Column Resizing](#column-resizing). |
 | `children` | `ReactNode` | — | Header cell content. |
@@ -192,6 +237,18 @@ const Row = createTableRow({ className: 'hover:bg-gray-50 border-b' })
 const SkeletonRow = createTableSkeletonRow({ className: 'animate-pulse' })
 const Empty = createTableEmpty({ className: 'py-20 text-gray-400' })
 const Footer = createTableFooter({ className: 'px-4 py-2 text-sm' })
+```
+
+`createTableColumn` accepts an optional generic type parameter for custom column props. Extra props are forwarded through to the column definitions and accessible in `VirtualTable`'s `className` / `style` callbacks:
+
+```typescript
+const Column = createTableColumn<{ transparent?: boolean }>({
+  resizable: true,
+  minWidth: 80,
+})
+
+// Then in JSX:
+<Column width={88} transparent />
 ```
 
 Then use them as drop-in replacements:

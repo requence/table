@@ -46,6 +46,7 @@ import { VirtualTable, useTableCache } from '@requence/table'
 function Users() {
   const cache = useTableCache('users', {
     pageSize: 50,
+    rowHeight: 32,
     getItemId: (u) => u.id,
     compare: (a, b) => a.name.localeCompare(b.name),
     fetchItems: async (offset, limit) => {
@@ -56,9 +57,8 @@ function Users() {
 
   return (
     <VirtualTable
-      totalCount={cache.totalCount}
+      {...cache}
       rowHeight={32}
-      onRangeChange={cache.handleRangeChange}
     >
       <VirtualTable.Header>
         <VirtualTable.Column width="2fr">Name</VirtualTable.Column>

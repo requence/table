@@ -4,19 +4,21 @@
 // See: https://github.com/oven-sh/bun/issues/27709
 import {
   VirtualTable as _VirtualTable,
-  createTableHeader as _createTableHeader,
-  createTableColumn as _createTableColumn,
   createTableBody as _createTableBody,
-  createTableSkeletonRow as _createTableSkeletonRow,
+  createTableColumn as _createTableColumn,
   createTableEmpty as _createTableEmpty,
   createTableFooter as _createTableFooter,
+  createTableHeader as _createTableHeader,
   createTableRow as _createTableRow,
+  createTableSkeletonRow as _createTableSkeletonRow,
 } from './VirtualTable.tsx'
 export type {
   SlotComponent,
+  VirtualTableHandle,
   VirtualTableProps,
   VirtualTableHeaderProps,
   VirtualTableColumnProps,
+  VirtualTableColumnDef,
   VirtualTableBodyProps,
   VirtualTableSkeletonRowProps,
   VirtualTableRowProps,
@@ -27,6 +29,8 @@ export type {
 
 import { useTableCache as _useTableCache } from './useTableCache.ts'
 export type { UseTableCacheOptions, TableCache } from './useTableCache.ts'
+
+export type { SmoothScrollConfig } from './useSmoothScroll.ts'
 
 import { useTableColumnWidths as _useTableColumnWidths } from './useTableColumnWidths.ts'
 

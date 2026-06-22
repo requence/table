@@ -108,6 +108,7 @@ import { VirtualTable, useTableCache, useTableColumnWidths } from '@requence/tab
 function UsersTable() {
   const cache = useTableCache('users', {
     pageSize: 50,
+    rowHeight: 40,
     getItemId: (user) => user.id,
     compare: (a, b) => a.name.localeCompare(b.name),
     fetchItems: (offset, limit) => api.getUsers({ offset, limit }),
@@ -117,9 +118,8 @@ function UsersTable() {
 
   return (
     <VirtualTable
-      totalCount={cache.totalCount}
+      {...cache}
       rowHeight={40}
-      onRangeChange={cache.handleRangeChange}
     >
       <VirtualTable.Header>
         <VirtualTable.Column

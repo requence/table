@@ -49,7 +49,16 @@ The package ships three building blocks:
 
 `@requence/table` uses [tailwind-merge](https://github.com/dcastil/tailwind-merge) internally to compose Tailwind utility classes. Your project **must have Tailwind CSS configured** for the component's built-in styles to take effect.
 
-The component itself does not bundle a stylesheet — it relies on Tailwind's utility classes being available in your build pipeline.
+The component itself does not bundle a stylesheet — it relies on Tailwind's utility classes being available in your build pipeline. By default, Tailwind only scans your own source files for class names. Because `@requence/table` lives in `node_modules`, you need to tell Tailwind to scan it too.
+
+Add the `@source` directive to your CSS entry point (e.g. `app.css` or `globals.css`):
+
+```css
+@import "tailwindcss";
+@source "../node_modules/@requence/table";
+```
+
+This ensures all utility classes used by `@requence/table` are included in the generated stylesheet.
 
 ## Architecture
 
@@ -79,6 +88,7 @@ import { VirtualTable, useTableCache } from '@requence/table'
 function UserTable() {
   const cache = useTableCache('users', {
     pageSize: 50,
+    rowHeight: 40,
     getItemId: (user) => user.id,
     compare: (a, b) => a.name.localeCompare(b.name),
     fetchItems: async (offset, limit) => {
@@ -90,9 +100,8 @@ function UserTable() {
 
   return (
     <VirtualTable
-      totalCount={cache.totalCount}
+      {...cache}
       rowHeight={40}
-      onRangeChange={cache.handleRangeChange}
       className="h-[600px]"
     >
       <VirtualTable.Header className="bg-zinc-900 text-sm text-zinc-400">

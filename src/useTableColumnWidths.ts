@@ -38,11 +38,7 @@ export function useTableColumnWidths(options?: UseColumnWidthsOptions) {
     (key: string, registerOptions?: RegisterOptions) => ({
       width: widths[key] ?? registerOptions?.defaultValue,
       resizable: true as const,
-      onResizeEnd: (
-        width: number,
-        _startWidth: number,
-        frValue: number,
-      ) => {
+      onResizeEnd: (width: number, _startWidth: number, frValue: number) => {
         if (registerOptions?.relative) {
           setWidths((prev) => ({
             ...prev,

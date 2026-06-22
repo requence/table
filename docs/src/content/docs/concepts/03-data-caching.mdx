@@ -1,6 +1,6 @@
 ---
 title: Data Caching
-description: How useTableCache provides Suspense-compatible paginated data caching with sort-aware mutations, ID tracking, and page invalidation.
+description: How useTableCache provides Suspense-compatible paginated data caching with sort-aware mutations, ID tracking, and surgical cache updates.
 ---
 
 ## Why a dedicated cache
@@ -42,16 +42,15 @@ This means you get automatic Suspense integration for the initial load and seaml
 Pages are fetched on demand as the user scrolls. The flow works like this:
 
 1. `VirtualTable` fires `onRangeChange({ start, end })` with the visible row indices.
-2. You pass this to `cache.handleRangeChange`.
+2. You pass this to `cache.onRangeChange` (or spread the cache return onto `VirtualTable` — see [Spread-friendly API](#spread-friendly-api)).
 3. The cache calculates which page indices cover the range (`Math.floor(start / pageSize)` through `Math.floor(end / pageSize)`).
 4. For each uncached, non-inflight page, it calls `fetchItems(offset, limit)`.
 5. When the fetch resolves, the page is stored and a re-render is triggered.
 
 ```tsx
 <VirtualTable
-  totalCount={cache.totalCount}
+  {...cache}
   rowHeight={40}
-  onRangeChange={cache.handleRangeChange}
 >
 ```
 
@@ -59,40 +58,52 @@ Pages that have already been fetched are not re-fetched. Duplicate requests for 
 
 ## Sort-aware upsert
 
-`upsert()` handles three cases depending on whether the item already exists:
+`upsert()` handles six cases depending on whether the item exists and where it belongs in the sort order:
 
-### 1. Exists on a cached page → update in-place
+### 1. Known item on a cached page → update in-place
 
 The cache iterates all cached pages, finds the item by ID, and replaces it. No position change, no count change.
 
-### 2. ID seen before but not currently loaded → skip
+### 2. Known ID, not on a cached page → skip
 
 If the cache has seen this ID in a previous fetch but the item isn't on any currently loaded page, the upsert is skipped — the server already has the correct data.
 
-### 3. Unknown ID → insert at sorted position
+### 3. Unknown ID, sorts within a cached page → surgical insert
 
-This is a genuinely new item. The cache finds the correct insertion position using the `compare` function and inserts the item. Pages after the insertion point are **invalidated** because their indices have shifted.
+This is a genuinely new item whose sort position falls within a cached page. The cache binary-searches the correct insertion position and inserts the item. Subsequent contiguous pages are **surgically shifted**: the last item is popped from each page and unshifted onto the next, maintaining page boundaries without re-fetching.
 
 After insertion:
 
-- If `fetchCount` is provided, a **debounced server count fetch** is triggered to get the authoritative total.
-- If `fetchCount` is not provided, `totalCount` is incremented optimistically (which may drift if items are being added to non-loaded pages).
+- `totalCount` is incremented by 1 immediately (the item is definitively new).
+- If `fetchCount` is provided, a **debounced server count fetch** is triggered to correct any accumulated drift.
+
+### 4. Unknown ID, sorts before first cached item
+
+The item is **not inserted** into the cache — it belongs on a page that isn't loaded. The cache increments `pendingAboveCount` (the item is above the viewport) and queries `fetchCount` to update the total. Scroll correction is applied when the count response arrives.
+
+### 5. Unknown ID, sorts after last cached item
+
+The item is **not inserted** — it belongs after all loaded data. The cache queries `fetchCount` to update the total. No scroll correction is needed because the item is below the viewport.
+
+### 6. Unknown ID, sorts between non-contiguous cached pages
+
+The item falls in a gap between cached pages and is **not inserted**. The cache queries `fetchCount`. If the item sorts before the visible range, `pendingAboveCount` is incremented for later scroll correction.
 
 ## ID tracking
 
-The cache remembers every item ID it has ever seen across all fetched pages. This lets it distinguish between:
+The cache remembers every item ID it has ever seen across all fetched pages, along with the page index where it was last seen. This is stored as a `Map<string, number>` and lets the cache distinguish between:
 
 | Scenario | Action |
 | -------- | ------ |
 | Item on a currently loaded page | Update in-place |
 | Item seen before, page no longer loaded | Skip (no count change) |
-| Genuinely new item | Insert + count adjustment |
+| Genuinely new item | Insert or defer to server |
 
-Without this tracking, the cache would have to assume every ID not found on loaded pages is new, causing `totalCount` to drift.
+The stored page index is also used during `remove()` to determine whether scroll correction is needed — if the item's last-known page is before the visible range, the removal shifts content above the viewport.
 
 ## Debounced `fetchCount`
 
-When `fetchCount` is provided in the options, the cache calls it (debounced at 150ms) after inserting a new item. This replaces the optimistic `totalCount += 1` with the **authoritative count from the server**.
+When `fetchCount` is provided in the options, the cache calls it (debounced at 150 ms) after upserts for unknown IDs. This replaces the optimistic `totalCount` adjustment with the **authoritative count from the server**.
 
 ```ts
 const cache = useTableCache('users', {
@@ -105,22 +116,52 @@ const cache = useTableCache('users', {
 })
 ```
 
-The debounce prevents a burst of real-time events from firing many count requests. Only the last one in a 150ms window executes.
+The debounce prevents a burst of real-time events from firing many count requests. Only the last one in a 150 ms window executes.
+
+When the count response arrives, the cache also applies **scroll correction**: if `pendingAboveCount` is greater than zero, the cache calls `scrollBy(pendingAboveCount * rowHeight)` on the VirtualTable handle to keep the visible content stable.
 
 If `fetchCount` is not provided, the cache falls back to `totalCount += 1` on insert and `totalCount -= 1` on remove.
 
-## Remove with page invalidation
+## Remove with surgical adjustment
 
-`remove(id)` deletes an item from the cache:
+`remove(id)` deletes an item from the cache without invalidating subsequent pages:
 
-1. The item's ID is removed from tracking.
-2. All loaded pages are searched for the item. If found, it is removed.
-3. `totalCount` is decremented by 1.
-4. **All pages after the removal point are invalidated** (deleted from the cache). Their indices have shifted, so they'll be re-fetched when scrolled into view.
+1. The item's ID is removed from the `knownIds` tracking map.
+2. If the item is on a cached page, it is spliced out and subsequent contiguous pages are **surgically pulled**: the first item from each next page fills the gap, maintaining page boundaries. The last contiguous page shrinks by one.
+3. If the item is known but not on a cached page, the cache uses its last-known page index to determine position relative to the viewport.
+4. `totalCount` is decremented by 1.
+5. If the item was **above the viewport** (either on a cached page before the visible range, or its last-known page is before the visible range), an **immediate scroll correction** of `-rowHeight` is applied to prevent layout shift.
 
 ```ts
 cache.remove('user-123')
 ```
+
+Unlike upsert (where scroll correction is deferred until `fetchCount` resolves), remove applies scroll correction immediately because `totalCount` is decremented on the same render — the virtualizer's height changes right away.
+
+## Scroll position correction
+
+When items are added or removed above the viewport, the virtualizer's total height changes, which would shift the visible content up or down. The cache prevents this by calling `scrollBy()` on the VirtualTable's imperative handle.
+
+The cache holds a `ref` to the VirtualTable, and VirtualTable exposes a `scrollBy(px)` method via `useImperativeHandle`.
+
+**Upsert** uses **deferred correction**: the cache tracks how many items were added above the viewport in `pendingAboveCount`. When `fetchCount` resolves, it computes how many of those items actually changed the count (`Math.min(pendingAboveCount, countDelta)`) and applies the correction.
+
+**Remove** uses **immediate correction**: since `totalCount` is decremented synchronously, the height change happens on the next render. The cache calls `scrollBy(-rowHeight)` immediately to compensate.
+
+## Spread-friendly API
+
+The cache return value is designed to be spread directly onto `VirtualTable`. The returned object contains `totalCount`, `getItem`, `onRangeChange`, and `ref` — all of which match VirtualTable's expected props. Extra properties (`upsert`, `remove`, `reset`, `loading`) are harmlessly ignored.
+
+```tsx
+const ROW_HEIGHT = 56
+const cache = useTableCache('tasks', { pageSize: 50, rowHeight: ROW_HEIGHT, ... })
+
+<VirtualTable {...cache} rowHeight={ROW_HEIGHT} overscan={10}>
+  ...
+</VirtualTable>
+```
+
+Extract `rowHeight` to a constant since it's needed in both the cache options (for scroll correction math) and on VirtualTable (for layout).
 
 ## Reset
 

@@ -58,13 +58,15 @@ When `minWidth` is set on a column, it prevents the column from collapsing below
 
 ### `onRangeChange` callback
 
-Every time the visible range changes, `VirtualTable` calls `onRangeChange` with `{ start, end }`. This is the hook point for triggering page fetches — typically you pass `cache.handleRangeChange` from `useTableCache`:
+Every time the visible range changes, `VirtualTable` calls `onRangeChange` with `{ start, end }`. Use this callback to fetch data for the newly visible row indices:
 
 ```tsx
 <VirtualTable
-  totalCount={cache.totalCount}
+  totalCount={totalCount}
   rowHeight={40}
-  onRangeChange={cache.handleRangeChange}
+  onRangeChange={({ start, end }) => {
+    // fetch rows start..end
+  }}
 >
 ```
 
@@ -89,7 +91,7 @@ onResizeEnd?: (width: number, startWidth: number, frValue: number) => void
 | `startWidth` | Pixel width when drag started                       |
 | `frValue`    | Equivalent `fr` value relative to other fr columns  |
 
-The `useTableColumnWidths` hook consumes these callbacks to persist widths automatically.
+You can use these callbacks to persist column widths (e.g. to `localStorage`) so they survive page reloads.
 
 ## Factory functions
 
@@ -182,3 +184,7 @@ When the `Body` render function returns `null` for a given index (typically beca
 ```
 
 Skeleton rows receive the same grid template as data rows, so the placeholder elements align with the header columns. They inherit the same positioning and height as regular data rows.
+
+### SVG background snapshot
+
+When a `SkeletonRow` is provided, `VirtualTable` captures it as an SVG snapshot and uses it as a repeating CSS `background-image` on the row container. This means the skeleton pattern fills the entire scrollable area — including rows that haven't been rendered to the DOM — without mounting thousands of placeholder elements. The snapshot is re-captured when the container width changes (e.g. after a window resize or column resize).

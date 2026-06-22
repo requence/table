@@ -5,7 +5,7 @@ description: API reference for the useTableCache hook — a Suspense-compatible 
 
 import { Aside } from '@astrojs/starlight/components';
 
-`useTableCache` manages paginated, sorted data for `VirtualTable`. It fetches pages on demand as the user scrolls, integrates with React Suspense for the initial load, and provides `upsert` / `remove` methods for real-time updates without full re-fetches.
+`useTableCache` manages paginated, sorted data for `VirtualTable`. It fetches pages on demand as the user scrolls, integrates with React Suspense for the initial load, and provides `upsert` / `remove` methods for real-time updates with surgical cache modifications and automatic scroll correction.
 
 ## Import
 
@@ -35,6 +35,8 @@ const cache = useTableCache(`users-${sortField}-${sortDir}-${filter}`, {
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `pageSize` | `number` | — | **Required.** Number of rows per page. Controls how many items are fetched per request. |
+| `rowHeight` | `number` | — | **Required.** Fixed height of each row in pixels. Used to calculate scroll corrections when items are added or removed above the viewport. |
+| `rowGap` | `number` | `0` | Gap between rows in pixels. Must match the `rowGap` passed to `VirtualTable`. Used to calculate scroll corrections — each row occupies `rowHeight + rowGap` pixels of scroll space. |
 | `getItemId` | `(item: T) => string` | — | **Required.** Extracts a unique ID from an item. Used to match items during `upsert` and `remove`. |
 | `compare` | `(a: T, b: T) => number` | — | **Required.** Comparator for sort order. Return negative if `a` comes before `b`, positive if after, `0` if equal. Used by `upsert()` to binary-search the correct insertion position. |
 | `fetchItems` | `(offset: number, limit: number) => Promise<{ items: T[]; total: number }>` | — | **Required.** Fetches a page of data from the server. Must return the items for the requested range and the total count. See [Suspense Behavior](#suspense-behavior). |
@@ -44,13 +46,17 @@ const cache = useTableCache(`users-${sortField}-${sortDir}-${filter}`, {
 
 | Property | Type | Description |
 |---|---|---|
+| `ref` | `React.RefObject<VirtualTableHandle \| null>` | Ref to pass to `VirtualTable` for scroll correction via imperative handle. |
+| `rowHeight` | `number` | The `rowHeight` value passed in options. Included so `{...cache}` wires it up on `VirtualTable` automatically. |
+| `rowGap` | `number` | The `rowGap` value passed in options (or `0`). Included so `{...cache}` wires it up on `VirtualTable` automatically. |
 | `totalCount` | `number` | Current total count. Updated by fetch results and by `upsert`/`remove` mutations. |
 | `getItem` | `(index: number) => T \| undefined` | Returns the item at the given absolute index, or `undefined` if the page containing that index hasn't been fetched yet. |
-| `handleRangeChange` | `(range: { start: number; end: number }) => void` | Pass this directly to `VirtualTable`'s `onRangeChange` prop. Triggers page fetches for any unfetched pages within the range. |
-| `upsert` | `(item: T) => void` | Insert or update an item. See [Upsert Behavior](#upsert-behavior). |
-| `remove` | `(id: string) => void` | Remove an item by ID. See [Remove Behavior](#remove-behavior). |
+| `onRangeChange` | `(range: { start: number; end: number }) => void` | Pass this directly to `VirtualTable`'s `onRangeChange` prop. Triggers page fetches for any unfetched pages within the range. |
+| `upsert` | `(item: T) => void` | Insert or update an item with surgical cache modification. See [Upsert Behavior](#upsert-behavior). |
+| `remove` | `(id: string) => void` | Remove an item by ID with surgical cache adjustment and immediate scroll correction. See [Remove Behavior](#remove-behavior). |
 | `reset` | `() => void` | Clear all cached pages. See [Reset Behavior](#reset-behavior). |
 | `loading` | `boolean` | `true` when a scroll-triggered page fetch is in-flight. `false` during the initial Suspense-suspended fetch. Use this to show a loading indicator in the header or footer. |
+| `getTotalCount` | `() => number` | Stable callback that returns the current `totalCount`. Useful in event handlers or effects that need the latest count without stale closure issues. |
 
 ## Suspense Behavior
 
@@ -72,43 +78,55 @@ const cache = useTableCache(`users-${sortField}-${sortDir}-${filter}`, {
 
 ## Upsert Behavior
 
-`upsert(item)` handles three cases:
+`upsert(item)` handles six cases:
 
 1. **Item exists on a cached page** — The item is updated **in-place** at its current position. No position change, no `totalCount` change.
 
 2. **Item ID is known but on a non-cached page** — The item is **skipped**. The cache has seen this ID in a previous fetch but the page has since been evicted or was never loaded. No action is taken because the server already has the correct data for that page.
 
-3. **Item ID is genuinely new** — The item is inserted at the correct sorted position using the `compare` function. Pages after the insertion point are **invalidated** (deleted from cache) because their indices have shifted.
-   - If `fetchCount` is provided, a debounced server call updates `totalCount` authoritatively.
-   - If `fetchCount` is not provided, `totalCount` is incremented optimistically.
+3. **Unknown ID, sorts within a cached page** — The item is inserted at the correct sorted position using `compare`. Subsequent contiguous pages are **surgically shifted**: the last item is popped from each page and unshifted onto the next, preserving page boundaries without re-fetching. `totalCount` is incremented by 1 immediately. If `fetchCount` is provided, a debounced server call corrects any accumulated drift.
+
+4. **Unknown ID, sorts before first cached item** — The item is **not inserted** into the cache. `pendingAboveCount` is incremented (the item is above the viewport). `fetchCount` is queried. Scroll correction is applied when the count response arrives.
+
+5. **Unknown ID, sorts after last cached item** — The item is **not inserted**. `fetchCount` is queried to update the total. No scroll correction is needed.
+
+6. **Unknown ID, sorts between non-contiguous cached pages** — The item falls in a gap and is **not inserted**. `fetchCount` is queried. If the item sorts before the visible range, `pendingAboveCount` is incremented for later scroll correction.
 
 <Aside type="tip">
-  This three-way behavior makes `upsert` safe to call with every real-time subscription event — updates to distant, non-visible items are essentially free.
+  Cases 1–2 make `upsert` safe to call with every real-time subscription event — updates to distant, non-visible items are essentially free. Cases 4–6 defer to the server, avoiding speculative insertions that could drift.
 </Aside>
 
 ## Remove Behavior
 
-`remove(id)` performs the following steps:
+`remove(id)` performs surgical cache adjustment:
 
-1. The item's ID is removed from tracking.
-2. All cached pages are searched for the item. If found, it is removed.
-3. `totalCount` is decremented (clamped to 0).
-4. All cached pages **after** the page where the item was found are invalidated, because their indices have shifted by one.
+1. The item's ID is removed from the `knownIds` tracking map.
+2. If the item is on a cached page, it is spliced out and subsequent contiguous pages are **surgically pulled**: the first item from each next page fills the gap. The last contiguous page shrinks by one.
+3. `totalCount` is decremented by 1 (clamped to 0).
+4. If the item was **above the viewport** — either on a cached page before the visible range, or its last-known page index (from `knownIds`) is before the visible range — an **immediate scroll correction** of `-(rowHeight + rowGap)` is applied to prevent layout shift.
+
+If the item ID is not found in `knownIds`, the removal is a no-op.
 
 ## Reset Behavior
 
-`reset()` discards all cached data:
+`reset()` discards all cached data and resets the viewport:
 
 1. Any pending `fetchCount` timer is cleared.
-2. The internal cache iteration counter is incremented, effectively replacing the cache with a fresh, empty instance.
-3. The next render will re-suspend because no pages exist — the Suspense fallback is shown again while the first page is re-fetched.
+2. The scroll position is reset to the top via `scrollTo(0)`.
+3. The internal cache iteration counter is incremented, effectively replacing the cache with a fresh, empty instance.
+4. The next render will re-suspend because no pages exist — the Suspense fallback is shown again while the first page is re-fetched.
 
 Use `reset()` when the underlying data has changed in a way that can't be expressed through `upsert`/`remove` (e.g. a bulk import, a filter change handled outside the key, or a manual refresh button).
 
 ## fetchCount Debouncing
 
-When `fetchCount` is provided and a genuinely new item arrives via `upsert`, the cache schedules a debounced call to `fetchCount()` with a **150 ms** delay. If another `upsert` arrives within that window, the timer is reset. This prevents a burst of real-time events from triggering many redundant count queries.
+When `fetchCount` is provided and an unknown item arrives via `upsert`, the cache schedules a debounced call to `fetchCount()` with a **150 ms** delay. If another `upsert` arrives within that window, the timer is reset. This prevents a burst of real-time events from triggering many redundant count queries.
 
-The authoritative count from the server replaces the optimistic `totalCount`, correcting any drift caused by items that were inserted on non-cached pages.
+When the count response arrives, the cache:
+
+1. Replaces the optimistic `totalCount` with the authoritative server count.
+2. Computes `aboveAdjustment = Math.min(pendingAboveCount, Math.max(0, countDelta))` — how many of the pending above-viewport items actually changed the count.
+3. Resets `pendingAboveCount` to 0.
+4. Calls `scrollBy(aboveAdjustment * (rowHeight + rowGap))` on the VirtualTable handle to keep visible content stable.
 
 If `fetchCount` is not provided, the cache falls back to incrementing `totalCount` by 1 for each new item. This is simpler but may drift if items are frequently inserted on pages the cache hasn't loaded.
