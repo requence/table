@@ -874,7 +874,6 @@ function VirtualTableInner<TExtras extends Record<string, unknown> = {}>(
             className="grid items-center"
             style={{
               gridTemplateColumns: GRID_VAR_REF,
-              height: rowHeight,
             }}
           >
             {columns.map((col, i) => (
