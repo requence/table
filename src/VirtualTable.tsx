@@ -51,8 +51,12 @@ export interface VirtualTableProps<
    * Useful for browsers (e.g. Safari) that don't natively smooth
    * discrete wheel deltas.
    * Pass `true` for defaults, `false` to disable, or a config object
-   * to customise `{ lerp, epsilon }`.
-   * Default: `true`.
+   * to customise `{ lerp, epsilon, safariOnly }`.
+   *
+   * By default `safariOnly` is `true`, so the lerp only activates in
+   * Safari. Set `safariOnly: false` to enable on all browsers.
+   *
+   * Default: `{ lerp: 0.08, epsilon: 0.5, safariOnly: true }`.
    */
   smoothScroll?: boolean | SmoothScrollConfig
   /** Called when the visible row range changes (for triggering page fetches) */
@@ -390,11 +394,17 @@ interface DataRowProps {
   children: ReactNode
 }
 
-function DataRow({ index, rowHeight, rowStride, rowProps, children }: DataRowProps) {
+function DataRow({
+  index,
+  rowHeight,
+  rowStride,
+  rowProps,
+  children,
+}: DataRowProps) {
   const { className, style, ...restProps } = rowProps
   return (
     <div
-      className="absolute w-full will-change-transform [contain:layout_style_paint]"
+      className="absolute w-full will-change-transform contain-[layout_style_paint]"
       style={{
         height: rowHeight,
         transform: `translateY(${index * rowStride}px)`,
@@ -563,7 +573,7 @@ function VirtualTableInner<TExtras extends Record<string, unknown> = {}>(
     rowGap = 0,
     overscan = 5,
     adjustScrollPosition = true,
-    smoothScroll = true,
+    smoothScroll = { lerp: 0.08, epsilon: 0.5, safariOnly: true },
     onRangeChange,
     onScroll: onScrollProp,
     className,
@@ -937,7 +947,8 @@ function VirtualTableInner<TExtras extends Record<string, unknown> = {}>(
     }
   }
 
-  const totalHeight = totalCount > 0 ? totalCount * (rowHeight + rowGap) - rowGap : 0
+  const totalHeight =
+    totalCount > 0 ? totalCount * (rowHeight + rowGap) - rowGap : 0
 
   return (
     <>

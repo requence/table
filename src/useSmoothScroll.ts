@@ -5,7 +5,19 @@ export interface SmoothScrollConfig {
   lerp?: number
   /** Stop animating when within this many pixels of target. Default: `0.5`. */
   epsilon?: number
+  /**
+   * When `true`, smooth scrolling is only active in Safari.
+   * Other browsers natively interpolate discrete wheel deltas,
+   * so the lerp is unnecessary there.
+   * Default: `true`.
+   */
+  safariOnly?: boolean
 }
+
+/** Detect Safari (not Chrome/Chromium-based). Cached at module level. */
+const isSafari =
+  typeof navigator !== 'undefined' &&
+  /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
 
 /**
  * Intercepts `wheel` events on `scrollRef` and applies rAF-based
@@ -25,7 +37,9 @@ export function useSmoothScroll(
   scrollRef: RefObject<HTMLDivElement | null>,
   config: boolean | SmoothScrollConfig,
 ) {
-  const enabled = config !== false
+  const safariOnly =
+    (typeof config === 'object' ? config.safariOnly : undefined) ?? true
+  const enabled = config !== false && (!safariOnly || isSafari)
   const lerp = (typeof config === 'object' ? config.lerp : undefined) ?? 0.08
   const epsilon =
     (typeof config === 'object' ? config.epsilon : undefined) ?? 0.5
