@@ -1,18 +1,24 @@
 # ── Stage 1: Install dependencies ─────────────────────────────────────
 FROM oven/bun:1 AS deps
 
-WORKDIR /app
+WORKDIR /app/docs
 
-COPY package.json bun.lock ./
+COPY docs/package.json docs/bun.lock ./
 RUN bun install --frozen-lockfile
 
 # ── Stage 2: Build the static site ───────────────────────────────────
 FROM oven/bun:1 AS build
 
-WORKDIR /app
+WORKDIR /app/docs
 
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+COPY --from=deps /app/docs/node_modules ./node_modules
+# Symlink at the common parent so files outside docs/ (e.g. example/)
+# can resolve packages via the standard node_modules walk
+RUN ln -s /app/docs/node_modules /app/node_modules
+# Copy the docs site and the parent source dirs it aliases into
+COPY docs/ .
+COPY src/ /app/src/
+COPY example/ /app/example/
 
 RUN bun run build
 
@@ -21,7 +27,7 @@ FROM nginx:alpine AS runtime
 
 RUN apk add --no-cache curl
 
-COPY --from=build /app/dist /usr/share/nginx/html
+COPY --from=build /app/docs/dist /usr/share/nginx/html
 
 # SPA-friendly fallback & caching
 COPY <<'EOF' /etc/nginx/conf.d/default.conf
