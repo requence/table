@@ -1,5 +1,13 @@
 # @requence/table
 
+## 1.1.1
+
+### Patch Changes
+
+- [`12b22f7`](https://github.com/requence/table/commit/12b22f7300ec4cbc28bd85dea71478f812919d99) Thanks [@Torsten85](https://github.com/Torsten85)! - Fix header row inheriting data row height in empty state
+
+- [`6e2d6c7`](https://github.com/requence/table/commit/6e2d6c77b5d3dec0f05865fd8ecf6ef19345704b) Thanks [@Torsten85](https://github.com/Torsten85)! - Fix laggy column resizing when React re-renders during drag
+
 ## 1.1.0
 
 ### Minor Changes
