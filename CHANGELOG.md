@@ -1,5 +1,15 @@
 # @requence/table
 
+## 1.1.0
+
+### Minor Changes
+
+- [`6348596`](https://github.com/requence/table/commit/6348596e66058f3e9f23e6fbcecc96baf9254ded) Thanks [@Torsten85](https://github.com/Torsten85)! - VirtualTable: expose imperative ref handle (`scrollTop`, `scrollBy`), add `onScroll` and `adjustScrollPosition` props, support callback-form `className`/`style` receiving parsed column definitions, export `VirtualTableColumnDef` type, allow extra column props via `TExtras` generic, render skeleton rows as tiled SVG background image.
+
+  useTableCache: rename `handleRangeChange` to `onRangeChange`, require `rowHeight` option for scroll correction, return `ref` and `getTotalCount`, correct scroll position on insert/remove above viewport, replace page invalidation with surgical shift/pull, defer cleanup for StrictMode compatibility.
+
+- [`1d3ee15`](https://github.com/requence/table/commit/1d3ee15d0b9bf0ae824c3457d567c7c437b0150c) Thanks [@Torsten85](https://github.com/Torsten85)! - Add `safariOnly` option to smooth scrolling config (default `true`), so the rAF lerp only activates in Safari where it is needed.
+
 ## 1.0.1
 
 ### Patch Changes
