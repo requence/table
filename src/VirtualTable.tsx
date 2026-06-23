@@ -587,6 +587,15 @@ function VirtualTableInner<TExtras extends Record<string, unknown> = {}>(
   const rowgroupRef = useRef<HTMLDivElement>(null)
   const skeletonCaptureRef = useRef<HTMLDivElement>(null)
 
+  // During a column-resize drag the grid template is manipulated via
+  // direct DOM access (setProperty) for 60 fps updates.  If React
+  // re-renders while the drag is in progress (e.g. from a subscription
+  // or scroll event), the inline `style` prop would overwrite the
+  // dragged value with the stale React-side template, causing jank.
+  // This ref preserves the current drag template so React always
+  // writes back the correct value.
+  const resizeOverrideRef = useRef<string | null>(null)
+
   // rAF lerp smooth scrolling (e.g. for Safari mouse-wheel)
   const cancelSmoothScroll = useSmoothScroll(scrollRef, smoothScroll)
 
@@ -810,10 +819,12 @@ function VirtualTableInner<TExtras extends Record<string, unknown> = {}>(
             return buildGridTemplate([c])
           })
           .join(' ')
+        resizeOverrideRef.current = template
         container.style.setProperty(GRID_VAR, template)
       }
 
       const handleMouseUp = () => {
+        resizeOverrideRef.current = null
         document.body.style.cursor = prevCursor
         document.removeEventListener('mousemove', handleMouseMove)
         document.removeEventListener('mouseup', handleMouseUp)
@@ -959,7 +970,7 @@ function VirtualTableInner<TExtras extends Record<string, unknown> = {}>(
         ref={scrollRef}
         onScroll={handleScroll}
         className={twMerge('relative overflow-auto', resolvedClassName)}
-        style={{ [GRID_VAR]: gridTemplate, ...resolvedStyle } as CSSProperties}
+        style={{ [GRID_VAR]: resizeOverrideRef.current ?? gridTemplate, ...resolvedStyle } as CSSProperties}
       >
         {/* Header */}
         <div
