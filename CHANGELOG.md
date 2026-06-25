@@ -1,5 +1,11 @@
 # @requence/table
 
+## 1.1.2
+
+### Patch Changes
+
+- [`2cdb14a`](https://github.com/requence/table/commit/2cdb14a37712605b31900766b5957fce3c249488) Thanks [@Torsten85](https://github.com/Torsten85)! - code cleanup
+
 ## 1.1.1
 
 ### Patch Changes
