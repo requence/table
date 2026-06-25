@@ -16,6 +16,7 @@ hero:
 
 import { Card, CardGrid } from '@astrojs/starlight/components'
 import LucideIcon from '../../components/LucideIcon.astro'
+import { TableDemo } from '@example/TableDemo.tsx'
 
 ## Features
 
@@ -32,66 +33,10 @@ import LucideIcon from '../../components/LucideIcon.astro'
     <LucideIcon name="Layers" slot="icon" size={22} />
     `useTableCache` integrates with React Suspense for initial loads and handles paginated fetching, sort-aware mutations, and real-time upserts out of the box.
   </Card>
-  <Card title="Column Persistence">
-    <LucideIcon name="SlidersHorizontal" slot="icon" size={22} />
-    Users can resize columns by dragging. `useTableColumnWidths` persists widths to localStorage and supports both pixel and fractional (`fr`) values.
-  </Card>
 </CardGrid>
 
-## Quick Example
+## Live Demo
 
-```tsx
-import { VirtualTable, useTableCache } from '@requence/table'
-
-function Users() {
-  const cache = useTableCache('users', {
-    pageSize: 50,
-    rowHeight: 32,
-    getItemId: (u) => u.id,
-    compare: (a, b) => a.name.localeCompare(b.name),
-    fetchItems: async (offset, limit) => {
-      const res = await fetch(`/api/users?offset=${offset}&limit=${limit}`)
-      return res.json()
-    },
-  })
-
-  return (
-    <VirtualTable
-      {...cache}
-      rowHeight={32}
-    >
-      <VirtualTable.Header>
-        <VirtualTable.Column width="2fr">Name</VirtualTable.Column>
-        <VirtualTable.Column width="2fr">Email</VirtualTable.Column>
-        <VirtualTable.Column width={100}>Role</VirtualTable.Column>
-      </VirtualTable.Header>
-
-      <VirtualTable.Body>
-        {(index) => {
-          const user = cache.getItem(index)
-          if (!user) return null
-          return (
-            <VirtualTable.Row>
-              <VirtualTable.Cell>{user.name}</VirtualTable.Cell>
-              <VirtualTable.Cell>{user.email}</VirtualTable.Cell>
-              <VirtualTable.Cell>{user.role}</VirtualTable.Cell>
-            </VirtualTable.Row>
-          )
-        }}
-      </VirtualTable.Body>
-
-      <VirtualTable.Empty>No users found.</VirtualTable.Empty>
-
-      <VirtualTable.Footer>
-        {({ start, end }) => `Rows ${start + 1}–${end}`}
-      </VirtualTable.Footer>
-    </VirtualTable>
-  )
-}
-```
-
-## Installation
-
-```bash
-npm install @requence/table
-```
+<div className="splash-demo not-content">
+  <TableDemo client:only="react" />
+</div>

@@ -4,7 +4,6 @@ import {
   useRef,
   useTransition,
   Suspense,
-  type CSSProperties,
 } from 'react'
 import { twMerge } from 'tailwind-merge'
 import {
@@ -25,13 +24,10 @@ import {
   AlertTriangle,
   Square,
   Pause,
-  Lock,
-  LockOpen,
-  Trash2,
   ArrowUp,
   Timer,
   LoaderCircle,
-  Mouse,
+
 } from 'lucide-react'
 
 /* ── Types ──────────────────────────────────────────────────────── */
@@ -261,7 +257,7 @@ const Header = createTableHeader({
     'sticky pt-1.5 top-0 z-10 mb-2 h-8 shrink-0 text-xs text-zinc-500 border-b border-zinc-800/80 backdrop-blur-sm bg-zinc-950/80',
 })
 
-const Column = createTableColumn<{ transparent?: boolean }>({
+const Column = createTableColumn({
   className:
     'px-3 text-left font-semibold uppercase tracking-wider text-zinc-400 select-none',
 })
@@ -288,16 +284,13 @@ const SkeletonRow = createTableSkeletonRow({
       <VirtualTable.Cell className="px-3 py-4">
         <div className="h-4 rounded bg-zinc-700/50 animate-pulse" />
       </VirtualTable.Cell>
-      <VirtualTable.Cell className="px-3 py-4">
-        <div className="h-4 rounded bg-zinc-700/50 animate-pulse" />
-      </VirtualTable.Cell>
     </>
   ),
 })
 
 const Row = createTableRow({
   className:
-    'cursor-pointer relative before:absolute before:inset-y-0 before:left-0 before:right-[var(--row-bg-inset)] before:-z-10 before:rounded-lg before:bg-zinc-800 hover:before:bg-zinc-700 transition-colors',
+    'cursor-pointer relative before:absolute before:inset-y-0 before:left-0 before:right-0 before:-z-10 before:rounded-lg before:bg-zinc-800 hover:before:bg-zinc-700 transition-colors',
 })
 
 const Empty = createTableEmpty({
@@ -317,7 +310,7 @@ function TaskTableInner({
   cacheRef,
   stallLoadingRef,
   adjustScrollPosition,
-  smoothScrolling,
+
   addLog,
 }: {
   inputValue: string
@@ -325,7 +318,7 @@ function TaskTableInner({
   cacheRef: React.RefObject<CacheRefObj | null>
   stallLoadingRef: React.RefObject<boolean>
   adjustScrollPosition: boolean
-  smoothScrolling: boolean
+
   addLog: (msg: string, type: string) => void
 }) {
   const [sort, setSort] = useState<SortState>({
@@ -399,25 +392,16 @@ function TaskTableInner({
   return (
     <div
       className={twMerge(
-        'grow min-h-0 flex flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 p-2',
+        'grow min-h-0 flex flex-col overflow-hidden border border-zinc-800 bg-zinc-950 p-2',
         isPending && 'pointer-events-none',
       )}
     >
-      <VirtualTable<{ transparent?: boolean }>
+      <VirtualTable
         {...cache}
         overscan={10}
         adjustScrollPosition={adjustScrollPosition}
-        smoothScroll={smoothScrolling}
+
         className="text-sm grow scrollbar scrollbar-zinc-500 [&_.resizer]:before:block [&_.resizer]:before:h-full [&_.resizer]:before:w-0.5 [&_.resizer]:before:-translate-x-0.5 [&_.resizer]:before:transition-colors [&_.resizer]:before:duration-200"
-        style={(columns) => {
-          const inset = columns
-            .filter((c) => c.transparent)
-            .reduce(
-              (sum, c) => sum + (typeof c.width === 'number' ? c.width : 0),
-              0,
-            )
-          return { '--row-bg-inset': `${inset}px` } as CSSProperties
-        }}
         aria-label="Tasks list"
       >
         <Header className="hover:[&_.resizer]:before:bg-orange-500">
@@ -517,7 +501,7 @@ function TaskTableInner({
               )}
             </span>
           </Column>
-          <Column width={94} transparent className="flex justify-end">
+          <Column width={50} className="flex justify-end">
             <LoaderCircle
               className={twMerge(
                 'text-orange-500 animate-spin size-4 transition-opacity opacity-0 duration-200 ease-in-out',
@@ -602,74 +586,8 @@ function TaskTableInner({
                   </div>
                 </VirtualTable.Cell>
 
-                {/* Column 7: Actions (show on hover) */}
-                <VirtualTable.Cell
-                  showOnHover
-                  className="flex items-center gap-1 justify-end px-3"
-                >
-                  {/* Toggle protect */}
-                  <Button
-                    severity={task.protected ? 'success' : undefined}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      const updated = { ...task, protected: !task.protected }
-                      tasksDatabaseRef.current = tasksDatabaseRef.current.map(
-                        (t) => (t.id === task.id ? updated : t),
-                      )
-                      cache.upsert(updated)
-                      addLog(
-                        `${task.protected ? 'Unprotected' : 'Protected'} task "${task.name}"`,
-                        'update',
-                      )
-                    }}
-                  >
-                    {task.protected ? (
-                      <Lock className="size-3.5" />
-                    ) : (
-                      <LockOpen className="size-3.5" />
-                    )}
-                  </Button>
-
-                  {/* Stop if running */}
-                  {task.status === 'RUNNING' && (
-                    <Button
-                      severity="warning"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        const updated = {
-                          ...task,
-                          status: 'STOPPED' as const,
-                          statusText: 'Stopped by operator user',
-                        }
-                        tasksDatabaseRef.current = tasksDatabaseRef.current.map(
-                          (t) => (t.id === task.id ? updated : t),
-                        )
-                        cache.upsert(updated)
-                        addLog(`Stopped task "${task.name}"`, 'update')
-                      }}
-                    >
-                      <Square className="size-3.5" />
-                    </Button>
-                  )}
-
-                  {/* Delete if not running */}
-                  {task.status !== 'RUNNING' && (
-                    <Button
-                      severity="danger"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        tasksDatabaseRef.current =
-                          tasksDatabaseRef.current.filter(
-                            (t) => t.id !== task.id,
-                          )
-                        cache.remove(task.id)
-                        addLog(`Deleted task "${task.name}"`, 'delete')
-                      }}
-                    >
-                      <Trash2 className="size-3.5" />
-                    </Button>
-                  )}
-                </VirtualTable.Cell>
+                {/* Column 7: Spacer for loader */}
+                <VirtualTable.Cell />
               </Row>
             )
           }}
@@ -703,7 +621,7 @@ export function TableDemo() {
   const [stallLoading, setStallLoading] = useState(false)
   const stallLoadingRef = useRef(false)
   const [adjustScrollPosition, setAdjustScrollPosition] = useState(true)
-  const [smoothScrolling, setSmoothScrolling] = useState(true)
+
   const [simLogs, setSimLogs] = useState<
     { id: number; msg: string; type: string }[]
   >([])
@@ -818,7 +736,7 @@ export function TableDemo() {
   return (
     <div className="flex flex-col gap-4 grow min-h-0">
       {/* Simulation & Filter Controls */}
-      <div className="shrink-0 flex flex-col gap-4 md:flex-row md:items-center md:justify-between bg-zinc-900/60 p-4 rounded-xl border border-zinc-800">
+      <div className="shrink-0 flex flex-col gap-4 md:flex-row md:items-center md:justify-between bg-zinc-900 p-4 border border-zinc-800">
         <div className="flex flex-wrap items-center gap-4">
           <h2 className="text-xl font-bold">
             Tasks ({displayCount.toLocaleString()})
@@ -922,31 +840,14 @@ export function TableDemo() {
             {adjustScrollPosition ? 'Scroll Adjust' : 'No Adjust'}
           </Button>
 
-          <Button
-            severity={!smoothScrolling ? 'warning' : undefined}
-            onClick={() => {
-              setSmoothScrolling((prev) => {
-                const next = !prev
-                addLog(
-                  next
-                    ? 'Smooth scrolling enabled'
-                    : 'Smooth scrolling disabled',
-                  'update',
-                )
-                return next
-              })
-            }}
-          >
-            <Mouse className="size-3.5" />
-            {smoothScrolling ? 'Smooth Scroll' : 'No Smooth'}
-          </Button>
+
         </div>
       </div>
 
       {/* Virtual Table with Suspense wrapping only the table viewport */}
       <Suspense
         fallback={
-          <div className="grow min-h-0 flex flex-col items-center justify-center text-zinc-500 animate-pulse bg-zinc-950 gap-2 rounded-xl border border-zinc-800 p-2">
+          <div className="grow min-h-0 flex flex-col items-center justify-center text-zinc-500 animate-pulse bg-zinc-950 gap-2 border border-zinc-800 p-2">
             <Loader2 className="size-6 animate-spin text-orange-500" />
             <span>Fetching matching tasks...</span>
           </div>
@@ -958,13 +859,13 @@ export function TableDemo() {
           cacheRef={cacheRef}
           stallLoadingRef={stallLoadingRef}
           adjustScrollPosition={adjustScrollPosition}
-          smoothScrolling={smoothScrolling}
+
           addLog={addLog}
         />
       </Suspense>
 
       {/* Logs Window */}
-      <div className="shrink-0 p-4 rounded-xl border border-zinc-800 bg-zinc-900/30">
+      <div className="shrink-0 p-4 border border-zinc-800 bg-zinc-900">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
           Simulation Logs
         </h3>

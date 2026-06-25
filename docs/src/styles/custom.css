@@ -539,19 +539,21 @@ site-search button[data-open-modal] kbd {
   box-shadow: none !important;
 }
 
-/* ── Live Demo Layout ────────────────────────────────────────────────── */
-body:has(.demo-container) .content-panel:has(> .sl-container > h1#_top),
-body:has(.demo-container) footer {
+
+/* ── Hide footer on splash page ──────────────────────────────────────── */
+
+body:has(.hero) footer {
   display: none;
 }
 
-.sl-container:has(.demo-container) {
-  max-width: 100%;
-}
+/* ── Splash page inline demo ─────────────────────────────────────────── */
 
-.demo-container {
-  height: calc(100dvh - var(--sl-nav-height) - 8rem);
+.splash-demo {
+  height: max(80vh, 960px);
   display: flex;
   flex-direction: column;
   min-height: 0;
+  margin-block-start: 1.5rem;
+  overflow: hidden;
 }
+

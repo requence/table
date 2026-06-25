@@ -15,7 +15,6 @@ import {
 } from 'react'
 import { flushSync } from 'react-dom'
 import { twMerge } from 'tailwind-merge'
-import { useSmoothScroll, type SmoothScrollConfig } from './useSmoothScroll.js'
 
 /* ── Types ──────────────────────────────────────────────────────── */
 
@@ -46,19 +45,7 @@ export interface VirtualTableProps<
    * Default: `true`.
    */
   adjustScrollPosition?: boolean
-  /**
-   * Enable rAF-based lerp interpolation for mouse-wheel scrolling.
-   * Useful for browsers (e.g. Safari) that don't natively smooth
-   * discrete wheel deltas.
-   * Pass `true` for defaults, `false` to disable, or a config object
-   * to customise `{ lerp, epsilon, safariOnly }`.
-   *
-   * By default `safariOnly` is `true`, so the lerp only activates in
-   * Safari. Set `safariOnly: false` to enable on all browsers.
-   *
-   * Default: `{ lerp: 0.08, epsilon: 0.5, safariOnly: true }`.
-   */
-  smoothScroll?: boolean | SmoothScrollConfig
+
   /** Called when the visible row range changes (for triggering page fetches) */
   onRangeChange?: (range: { start: number; end: number }) => void
   /** Called on every scroll event with the current scroll position and total scrollable height */
@@ -573,7 +560,7 @@ function VirtualTableInner<TExtras extends Record<string, unknown> = {}>(
     rowGap = 0,
     overscan = 5,
     adjustScrollPosition = true,
-    smoothScroll = { lerp: 0.08, epsilon: 0.5, safariOnly: true },
+
     onRangeChange,
     onScroll: onScrollProp,
     className,
@@ -596,17 +583,12 @@ function VirtualTableInner<TExtras extends Record<string, unknown> = {}>(
   // writes back the correct value.
   const resizeOverrideRef = useRef<string | null>(null)
 
-  // rAF lerp smooth scrolling (e.g. for Safari mouse-wheel)
-  const cancelSmoothScroll = useSmoothScroll(scrollRef, smoothScroll)
 
   // Track the prop in a ref so the imperative handle (stable identity)
   // always reads the current value without being recreated.
   const adjustRef = useRef(adjustScrollPosition)
   adjustRef.current = adjustScrollPosition
 
-  // Keep cancel in a ref so the stable imperative handle can access it
-  const cancelSmoothScrollRef = useRef(cancelSmoothScroll)
-  cancelSmoothScrollRef.current = cancelSmoothScroll
 
   // ── Imperative handle ────────────────────────────────────────
   useImperativeHandle(
@@ -616,7 +598,6 @@ function VirtualTableInner<TExtras extends Record<string, unknown> = {}>(
         return scrollRef.current?.scrollTop ?? 0
       },
       scrollTo: (px: number) => {
-        cancelSmoothScrollRef.current()
         scrollRef.current?.scrollTo({ top: px })
       },
       scrollBy: (px: number) => {

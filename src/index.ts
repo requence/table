@@ -30,7 +30,6 @@ export type {
 import { useTableCache as _useTableCache } from './useTableCache.ts'
 export type { UseTableCacheOptions, TableCache } from './useTableCache.ts'
 
-export type { SmoothScrollConfig } from './useSmoothScroll.ts'
 
 import { useTableColumnWidths as _useTableColumnWidths } from './useTableColumnWidths.ts'
 

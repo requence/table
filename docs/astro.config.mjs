@@ -78,7 +78,6 @@ export default defineConfig({
           label: 'Guides',
           items: [
             { label: 'Basic Table', slug: 'guides/01-basic-table' },
-            { label: 'Live Demo', slug: 'guides/02-demo' },
           ],
         },
       ],

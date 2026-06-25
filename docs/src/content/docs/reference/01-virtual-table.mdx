@@ -61,7 +61,7 @@ import { VirtualTable } from '@requence/table'
 | `aria-label` | `string` | — | Accessible label for the table element. |
 | `children` | `ReactNode` | — | Sub-components (Header, Body, SkeletonRow, Empty, Footer). |
 | `adjustScrollPosition` | `boolean` | `true` | Whether the imperative `scrollBy` handle adjusts scroll position. Set to `false` to disable programmatic scroll correction. |
-| `smoothScroll` | `boolean \| SmoothScrollConfig` | `true` | Enable rAF-based lerp interpolation for mouse-wheel scrolling. Pass `true` for defaults, `false` to disable, or `{ lerp?, epsilon? }` to customise. See [SmoothScrollConfig](#smoothscrollconfig). |
+
 | `onScroll` | `(scrollTop: number, scrollHeight: number) => void` | — | Called on every scroll event with the current scroll position and total scrollable height. |
 | `ref` | `React.Ref<VirtualTableHandle>` | — | Ref to access the imperative handle. See [VirtualTableHandle](#virtualtablehandle). |
 
@@ -90,21 +90,9 @@ import type { VirtualTableHandle } from '@requence/table'
 | Property | Type | Description |
 |---|---|---|
 | `scrollTop` | `number` (readonly) | Current scroll position in pixels. |
-| `scrollTo` | `(px: number) => void` | Scroll to an absolute pixel offset. Cancels any in-flight smooth-scroll animation. |
+| `scrollTo` | `(px: number) => void` | Scroll to an absolute pixel offset. |
 | `scrollBy` | `(px: number) => void` | Adjust the scroll position by the given number of pixels. Gated by the `adjustScrollPosition` prop. |
 
-## SmoothScrollConfig
-
-Configuration object for the `smoothScroll` prop. All fields are optional.
-
-```typescript
-import type { SmoothScrollConfig } from '@requence/table'
-```
-
-| Property | Type | Default | Description |
-|---|---|---|---|
-| `lerp` | `number` | `0.08` | Lerp factor per frame — higher values feel snappier, lower values produce a smoother glide. |
-| `epsilon` | `number` | `0.5` | Stop threshold in pixels — the animation stops when the remaining distance is below this value. |
 
 ## Sub-Components
 
