@@ -888,8 +888,9 @@ function VirtualTableInner<TExtras extends Record<string, unknown> = {}>(
 
         {/* Empty */}
         <div
+          key="vtable-empty"
           className={twMerge(
-            'flex items-center justify-center',
+            'grow flex items-center justify-center',
             empty.className,
           )}
         >
@@ -1000,6 +1001,7 @@ function VirtualTableInner<TExtras extends Record<string, unknown> = {}>(
 
         {/* Body sentinel + visible rows */}
         <div
+          key="vtable-body"
           ref={rowgroupRef}
           role="rowgroup"
           className="relative"

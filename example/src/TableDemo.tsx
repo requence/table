@@ -286,7 +286,7 @@ const Row = createTableRow({
 })
 
 const Empty = createTableEmpty({
-  className: 'bg-zinc-800 rounded-xl p-10 text-sm italic text-zinc-500',
+  className: 'p-10 text-sm italic text-zinc-500',
 })
 
 const Footer = createTableFooter({
@@ -297,7 +297,7 @@ const Footer = createTableFooter({
 /* ── Inner Table Component (handles Suspense boundary correctly) ── */
 
 function TaskTableInner({
-  inputValue,
+  filterText: filterTextProp,
   tasksDatabaseRef,
   cacheRef,
   stallLoadingRef,
@@ -305,7 +305,7 @@ function TaskTableInner({
 
   addLog,
 }: {
-  inputValue: string
+  filterText: string
   tasksDatabaseRef: React.RefObject<TaskItem[]>
   cacheRef: React.RefObject<CacheRefObj | null>
   stallLoadingRef: React.RefObject<boolean>
@@ -317,7 +317,7 @@ function TaskTableInner({
     field: 'createdAt',
     direction: 'DESC',
   })
-  const [filterText, setFilterText] = useState(inputValue)
+  const [filterText, setFilterText] = useState(filterTextProp)
   const [isPending, startTransition] = useTransition()
 
   const cache = useTableCache<TaskItem>('tasks', {
@@ -362,15 +362,15 @@ function TaskTableInner({
   }
 
   // Defer filter text updates so typing stays responsive
-  const prevInputValue = useRef(inputValue)
+  const prevFilterText = useRef(filterTextProp)
   useEffect(() => {
-    if (prevInputValue.current === inputValue) return
-    prevInputValue.current = inputValue
+    if (prevFilterText.current === filterTextProp) return
+    prevFilterText.current = filterTextProp
     startTransition(() => {
-      setFilterText(inputValue)
+      setFilterText(filterTextProp)
       cache.reset()
     })
-  }, [inputValue])
+  }, [filterTextProp])
 
   // Expose cache controls to parent component for updates.
   // Uses getTotalCount() instead of a snapshot so the parent can
@@ -606,6 +606,7 @@ function TaskTableInner({
 
 export function TableDemo() {
   const [inputValue, setInputValue] = useState('')
+  const [filterText, setFilterText] = useState('')
 
   const [isSimulating, setIsSimulating] = useState(false)
   const [simSpeed, setSimSpeed] = useState(1000)
@@ -737,6 +738,11 @@ export function TableDemo() {
             placeholder="Filter by name..."
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                setFilterText(inputValue)
+              }
+            }}
             className="bg-zinc-850 border border-zinc-700 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-orange-500 text-zinc-100 placeholder-zinc-500 w-52"
           />
         </div>
@@ -843,7 +849,7 @@ export function TableDemo() {
         }
       >
         <TaskTableInner
-          inputValue={inputValue}
+          filterText={filterText}
           tasksDatabaseRef={tasksDatabaseRef}
           cacheRef={cacheRef}
           stallLoadingRef={stallLoadingRef}
