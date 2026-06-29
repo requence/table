@@ -28,7 +28,7 @@ export type {
 } from './VirtualTable.tsx'
 
 import { useTableCache as _useTableCache } from './useTableCache.ts'
-export type { UseTableCacheOptions, TableCache } from './useTableCache.ts'
+export type { UseTableCacheOptions, TableCache, CacheKey } from './useTableCache.ts'
 
 
 import { useTableColumnWidths as _useTableColumnWidths } from './useTableColumnWidths.ts'

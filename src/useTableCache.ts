@@ -198,12 +198,21 @@ const cleanupTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 /* ── Hook ────────────────────────────────────────────────────── */
 
+export type CacheKey = string | number | (string | number)[]
+
 export function useTableCache<T>(
-  key: string,
+  key: CacheKey,
   options: UseTableCacheOptions<T>,
 ): TableCache<T> {
-  const { pageSize, rowHeight, rowGap = 0, getItemId, compare, fetchItems, fetchCount } =
-    options
+  const {
+    pageSize,
+    rowHeight,
+    rowGap = 0,
+    getItemId,
+    compare,
+    fetchItems,
+    fetchCount,
+  } = options
   const rowStride = rowHeight + rowGap
 
   const [, forceRender] = useState(0)
@@ -212,8 +221,12 @@ export function useTableCache<T>(
     forceRender((c) => c + 1)
   }, [])
 
-  const activeKey = [key, iteration].join('-')
-  // ── Get or create cache (useId() survives Suspense) ────────────
+  const normalizedKey = Array.isArray(key) ? key.join('-') : String(key)
+  const activeKey = [normalizedKey, iteration].join('-')
+
+  // ── Get or create cache ──────────────────────────────────────────
+  // Uses the deferred key: urgent renders keep the old cache (with data),
+  // deferred renders switch to the new cache (may suspend).
   const currentCache = resolveCache(
     activeKey,
     { fetchItems, fetchCount, compare, getItemId },
@@ -236,24 +249,24 @@ export function useTableCache<T>(
   // Deferred via setTimeout(0) so React StrictMode's simulated
   // unmount→remount cycle can cancel the timer before it fires.
   useEffect(() => {
-    const pending = cleanupTimers.get(key)
+    const pending = cleanupTimers.get(normalizedKey)
     if (pending != null) {
       clearTimeout(pending)
-      cleanupTimers.delete(key)
+      cleanupTimers.delete(normalizedKey)
     }
 
     return () => {
       const timer = setTimeout(() => {
-        cleanupTimers.delete(key)
+        cleanupTimers.delete(normalizedKey)
         for (const k of cacheMap.keys()) {
-          if (k.startsWith(key)) {
+          if (k.startsWith(normalizedKey)) {
             cacheMap.delete(k)
           }
         }
       }, 0)
-      cleanupTimers.set(key, timer)
+      cleanupTimers.set(normalizedKey, timer)
     }
-  }, [key])
+  }, [normalizedKey])
 
   // ── Fetch a page (non-blocking, for scroll-triggered loads) ────
   const fetchPage = useCallback(

@@ -148,58 +148,66 @@ interface Slots {
 
 /* ── Slot system ───────────────────────────────────────────────── */
 
-export interface SlotComponent<P> {
-  (props: P): ReactNode
+/** Make keys present in D optional in P, leaving everything else unchanged. */
+type PropsWithDefaults<P, D extends Partial<P>> = Omit<P, keyof D> &
+  Partial<Pick<P, Extract<keyof D, keyof P>>>
+
+export interface SlotComponent<P, D extends Partial<P> = Partial<P>> {
+  (props: PropsWithDefaults<P, D>): ReactNode
   slot: string
-  slotDefaults: Partial<P>
+  slotDefaults: D
 }
 
-function asSlot<P>(slot: string, defaults?: Partial<P>): SlotComponent<P> {
-  const Component = (() => null) as unknown as SlotComponent<P>
+function asSlot<P, D extends Partial<P> = Partial<P>>(
+  slot: string,
+  defaults?: D,
+): SlotComponent<P, D> {
+  const Component = (() => null) as unknown as SlotComponent<P, D>
   Component.slot = slot
-  Component.slotDefaults = defaults ?? ({} as Partial<P>)
+  Component.slotDefaults = (defaults ?? {}) as D
   return Component
 }
 
-export function createTableHeader(
-  defaults?: Partial<VirtualTableHeaderProps>,
-): SlotComponent<VirtualTableHeaderProps> {
+export function createTableHeader<
+  D extends Partial<VirtualTableHeaderProps> = {},
+>(defaults?: D): SlotComponent<VirtualTableHeaderProps, D> {
   return asSlot('header', defaults)
 }
 
-export function createTableColumn<TExtras extends Record<string, unknown> = {}>(
-  defaults?: Partial<VirtualTableColumnProps & TExtras>,
-): SlotComponent<VirtualTableColumnProps & TExtras> {
+export function createTableColumn<
+  TExtras extends Record<string, unknown> = {},
+  D extends Partial<VirtualTableColumnProps & TExtras> = {},
+>(defaults?: D): SlotComponent<VirtualTableColumnProps & TExtras, D> {
   return asSlot('column', defaults)
 }
 
-export function createTableBody(
-  defaults?: Partial<VirtualTableBodyProps>,
-): SlotComponent<VirtualTableBodyProps> {
+export function createTableBody<D extends Partial<VirtualTableBodyProps> = {}>(
+  defaults?: D,
+): SlotComponent<VirtualTableBodyProps, D> {
   return asSlot('body', defaults)
 }
 
-export function createTableSkeletonRow(
-  defaults?: Partial<VirtualTableSkeletonRowProps>,
-): SlotComponent<VirtualTableSkeletonRowProps> {
+export function createTableSkeletonRow<
+  D extends Partial<VirtualTableSkeletonRowProps> = {},
+>(defaults?: D): SlotComponent<VirtualTableSkeletonRowProps, D> {
   return asSlot('skeletonRow', defaults)
 }
 
-export function createTableEmpty(
-  defaults?: Partial<VirtualTableEmptyProps>,
-): SlotComponent<VirtualTableEmptyProps> {
+export function createTableEmpty<
+  D extends Partial<VirtualTableEmptyProps> = {},
+>(defaults?: D): SlotComponent<VirtualTableEmptyProps, D> {
   return asSlot('empty', defaults)
 }
 
-export function createTableFooter(
-  defaults?: Partial<VirtualTableFooterProps>,
-): SlotComponent<VirtualTableFooterProps> {
+export function createTableFooter<
+  D extends Partial<VirtualTableFooterProps> = {},
+>(defaults?: D): SlotComponent<VirtualTableFooterProps, D> {
   return asSlot('footer', defaults)
 }
 
-export function createTableRow(
-  defaults?: Partial<VirtualTableRowProps>,
-): SlotComponent<VirtualTableRowProps> {
+export function createTableRow<D extends Partial<VirtualTableRowProps> = {}>(
+  defaults?: D,
+): SlotComponent<VirtualTableRowProps, D> {
   return asSlot('row', defaults)
 }
 
@@ -583,12 +591,10 @@ function VirtualTableInner<TExtras extends Record<string, unknown> = {}>(
   // writes back the correct value.
   const resizeOverrideRef = useRef<string | null>(null)
 
-
   // Track the prop in a ref so the imperative handle (stable identity)
   // always reads the current value without being recreated.
   const adjustRef = useRef(adjustScrollPosition)
   adjustRef.current = adjustScrollPosition
-
 
   // ── Imperative handle ────────────────────────────────────────
   useImperativeHandle(
@@ -725,7 +731,9 @@ function VirtualTableInner<TExtras extends Record<string, unknown> = {}>(
   // visible range would go stale without this.
   useEffect(() => {
     const el = scrollRef.current
-    if (!el) return
+    if (!el) {
+      return
+    }
 
     const observer = new ResizeObserver(() => {
       const range = computeRange()
@@ -950,7 +958,12 @@ function VirtualTableInner<TExtras extends Record<string, unknown> = {}>(
         ref={scrollRef}
         onScroll={handleScroll}
         className={twMerge('relative overflow-auto', resolvedClassName)}
-        style={{ [GRID_VAR]: resizeOverrideRef.current ?? gridTemplate, ...resolvedStyle } as CSSProperties}
+        style={
+          {
+            [GRID_VAR]: resizeOverrideRef.current ?? gridTemplate,
+            ...resolvedStyle,
+          } as CSSProperties
+        }
       >
         {/* Header */}
         <div

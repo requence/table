@@ -17,14 +17,31 @@ import { useTableCache } from '@requence/table'
 
 ```typescript
 function useTableCache<T>(
-  key: string,
+  key: CacheKey,
   options: UseTableCacheOptions<T>,
 ): TableCache<T>
 ```
 
-**`key`** — A stable string that identifies this cache. When the key changes (e.g. because a filter or sort order changed), the cache is discarded and the next render will re-suspend. Combine dynamic parameters into the key:
+**`key`** — A stable `CacheKey` (`string | number | (string | number)[]`) that identifies this cache. When the key changes (e.g. because a filter or sort order changed), the cache is discarded and the next render will re-suspend.
+
+You can pass a single string or number:
 
 ```typescript
+const cache = useTableCache('users', { /* ... */ })
+```
+
+Or combine multiple dynamic parameters into an **array key** — the elements are joined with `'-'` internally:
+
+```typescript
+const cache = useTableCache(['users', sortField, sortDir, filter], {
+  // ...
+})
+```
+
+This is equivalent to building the string yourself, but avoids manual concatenation and makes each segment explicit:
+
+```typescript
+// Same effect as the array key above
 const cache = useTableCache(`users-${sortField}-${sortDir}-${filter}`, {
   // ...
 })

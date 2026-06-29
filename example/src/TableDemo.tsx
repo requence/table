@@ -1,10 +1,4 @@
-import {
-  useState,
-  useEffect,
-  useRef,
-  useTransition,
-  Suspense,
-} from 'react'
+import { useState, useEffect, useRef, useTransition, Suspense } from 'react'
 import { twMerge } from 'tailwind-merge'
 import {
   VirtualTable,
@@ -27,7 +21,6 @@ import {
   ArrowUp,
   Timer,
   LoaderCircle,
-
 } from 'lucide-react'
 
 /* ── Types ──────────────────────────────────────────────────────── */
@@ -265,8 +258,7 @@ const Column = createTableColumn({
 const Body = createTableBody()
 
 const SkeletonRow = createTableSkeletonRow({
-  className:
-    'animate-pulse relative before:absolute before:-z-10 before:inset-y-0 before:left-0 before:right-[var(--row-bg-inset)] before:rounded-lg before:bg-zinc-800',
+  className: 'animate-pulse rounded-lg bg-zinc-800',
   children: (
     <>
       <VirtualTable.Cell className="px-3 py-4">
@@ -290,7 +282,7 @@ const SkeletonRow = createTableSkeletonRow({
 
 const Row = createTableRow({
   className:
-    'cursor-pointer relative before:absolute before:inset-y-0 before:left-0 before:right-0 before:-z-10 before:rounded-lg before:bg-zinc-800 hover:before:bg-zinc-700 transition-colors',
+    'cursor-pointer rounded-lg bg-zinc-800 hover:bg-zinc-700 transition-colors',
 })
 
 const Empty = createTableEmpty({
@@ -400,8 +392,7 @@ function TaskTableInner({
         {...cache}
         overscan={10}
         adjustScrollPosition={adjustScrollPosition}
-
-        className="text-sm grow scrollbar scrollbar-zinc-500 [&_.resizer]:before:block [&_.resizer]:before:h-full [&_.resizer]:before:w-0.5 [&_.resizer]:before:-translate-x-0.5 [&_.resizer]:before:transition-colors [&_.resizer]:before:duration-200"
+        className="text-sm grow pb-8 scrollbar scrollbar-zinc-500 [&_.resizer]:before:block [&_.resizer]:before:h-full [&_.resizer]:before:w-0.5 [&_.resizer]:before:-translate-x-0.5 [&_.resizer]:before:transition-colors [&_.resizer]:before:duration-200"
         aria-label="Tasks list"
       >
         <Header className="hover:[&_.resizer]:before:bg-orange-500">
@@ -839,8 +830,6 @@ export function TableDemo() {
             <ArrowUp className="size-3.5" />
             {adjustScrollPosition ? 'Scroll Adjust' : 'No Adjust'}
           </Button>
-
-
         </div>
       </div>
 
@@ -859,7 +848,6 @@ export function TableDemo() {
           cacheRef={cacheRef}
           stallLoadingRef={stallLoadingRef}
           adjustScrollPosition={adjustScrollPosition}
-
           addLog={addLog}
         />
       </Suspense>

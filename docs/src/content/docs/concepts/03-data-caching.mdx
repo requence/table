@@ -16,10 +16,14 @@ A virtualized table needs more than a simple data array. It needs:
 
 ## Cache persistence across Suspense
 
-The cache is keyed by the `key` string you pass to the hook:
+The cache is keyed by the `key` you pass to the hook. The key can be a `string`, `number`, or an array of both — arrays are joined with `'-'` internally:
 
 ```ts
+// Simple string key
 const cache = useTableCache('users', { ... })
+
+// Combined array key — equivalent to 'users-name-asc'
+const cache = useTableCache(['users', sortField, sortDir], { ... })
 ```
 
 This is critical for Suspense: when the hook suspends the component, React unmounts and remounts it. The cache survives these cycles — when the component remounts, it finds the existing data and reads it without re-fetching.
