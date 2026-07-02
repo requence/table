@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
 
 import type { VirtualTableHandle } from './VirtualTable.tsx'
 
@@ -215,6 +215,12 @@ export function useTableCache<T>(
   } = options
   const rowStride = rowHeight + rowGap
 
+  // ── Stable wrappers for user-supplied option functions ────────
+  // useEffectEvent gives a stable identity that always delegates to
+  // the latest version — no need to list these in useCallback deps.
+  const stableGetItemId = useEffectEvent((item: T) => getItemId(item))
+  const stableCompare = useEffectEvent((a: T, b: T) => compare(a, b))
+
   const [, forceRender] = useState(0)
   const [iteration, setIteration] = useState(0)
   const rerender = useCallback(() => {
@@ -384,11 +390,11 @@ export function useTableCache<T>(
   const upsert = useCallback(
     (item: T) => {
       const c = cacheRef.current
-      const id = getItemId(item)
+      const id = stableGetItemId(item)
 
       // ── Case 1: existing item on cached page → update in-place
       for (const [, page] of c.pages) {
-        const idx = page.findIndex((p) => getItemId(p) === id)
+        const idx = page.findIndex((p) => stableGetItemId(p) === id)
         if (idx !== -1) {
           page[idx] = item
           rerender()
@@ -427,7 +433,7 @@ export function useTableCache<T>(
       if (
         firstPageIndex > 0 &&
         firstPage.length > 0 &&
-        c.compare(item, firstPage[0]) < 0
+        stableCompare(item, firstPage[0]) < 0
       ) {
         c.pendingAboveCount++
         if (c.fetchCount) {
@@ -441,16 +447,35 @@ export function useTableCache<T>(
         return
       }
 
-      // ── Case 5: sorts after last cached item → below viewport
+      // ── Case 5: sorts after last cached item
       if (
         lastPage.length > 0 &&
-        c.compare(item, lastPage[lastPage.length - 1]) > 0
+        stableCompare(item, lastPage[lastPage.length - 1]) > 0
       ) {
-        if (c.fetchCount) {
-          debouncedFetchCount()
-        } else {
+        // Check if the last cached page is the terminal page of the
+        // dataset. If so, append directly — there are no unseen items
+        // between the last cached item and the new one.
+        const isTerminalPage =
+          lastPageIndex * pageSize + lastPage.length >= c.totalCount
+
+        if (isTerminalPage) {
+          lastPage.push(item)
+          c.knownIds.set(id, lastPageIndex)
+          surgicalShift(c, lastPageIndex, pageSize)
           c.totalCount += 1
+
+          if (c.fetchCount) {
+            debouncedFetchCount()
+          }
+        } else {
+          // Not the terminal page → item is below viewport, defer
+          if (c.fetchCount) {
+            debouncedFetchCount()
+          } else {
+            c.totalCount += 1
+          }
         }
+
         rerender()
         return
       }
@@ -469,7 +494,7 @@ export function useTableCache<T>(
         const lastItem = page[page.length - 1]
 
         // Item sorts before first item of this page
-        if (c.compare(item, firstItem) <= 0) {
+        if (stableCompare(item, firstItem) <= 0) {
           page.unshift(item)
           c.knownIds.set(id, pageIndex)
           surgicalShift(c, pageIndex, pageSize)
@@ -479,13 +504,13 @@ export function useTableCache<T>(
         }
 
         // Item sorts within this page
-        if (c.compare(item, lastItem) <= 0) {
+        if (stableCompare(item, lastItem) <= 0) {
           // Binary search for insertion point
           let lo = 0
           let hi = page.length
           while (lo < hi) {
             const mid = (lo + hi) >>> 1
-            if (c.compare(item, page[mid]) <= 0) {
+            if (stableCompare(item, page[mid]) <= 0) {
               hi = mid
             } else {
               lo = mid + 1
@@ -529,7 +554,7 @@ export function useTableCache<T>(
         if (
           firstVisiblePageData &&
           firstVisiblePageData.length > 0 &&
-          c.compare(item, firstVisiblePageData[0]) < 0
+          stableCompare(item, firstVisiblePageData[0]) < 0
         ) {
           c.pendingAboveCount++
         }
@@ -543,7 +568,7 @@ export function useTableCache<T>(
 
       rerender()
     },
-    [getItemId, rerender, debouncedFetchCount, pageSize, rowStride],
+    [rerender, debouncedFetchCount, pageSize, rowStride],
   )
 
   // ── remove ─────────────────────────────────────────────────────
@@ -557,7 +582,7 @@ export function useTableCache<T>(
       let removedAbsoluteIndex: number | null = null
 
       for (const [pageIndex, page] of c.pages) {
-        const idx = page.findIndex((item) => getItemId(item) === id)
+        const idx = page.findIndex((item) => stableGetItemId(item) === id)
         if (idx !== -1) {
           removedAbsoluteIndex = pageIndex * pageSize + idx
           page.splice(idx, 1)
@@ -588,7 +613,7 @@ export function useTableCache<T>(
 
       rerender()
     },
-    [getItemId, rerender, pageSize, rowStride],
+    [rerender, pageSize, rowStride],
   )
 
   // ── reset ──────────────────────────────────────────────────────
@@ -606,19 +631,37 @@ export function useTableCache<T>(
 
   const getTotalCount = useCallback(() => cacheRef.current.totalCount, [])
 
-  return {
-    ref: tableRef,
-    rowHeight,
-    rowGap,
-    totalCount: currentCache.totalCount,
-    getTotalCount,
-    getItem,
-    onRangeChange,
-    upsert,
-    remove,
-    reset,
-    loading: currentCache.inflight.size > 0,
-  }
+  const totalCount = currentCache.totalCount
+  const loading = currentCache.inflight.size > 0
+
+  return useMemo(
+    () => ({
+      ref: tableRef,
+      rowHeight,
+      rowGap,
+      totalCount,
+      getTotalCount,
+      getItem,
+      onRangeChange,
+      upsert,
+      remove,
+      reset,
+      loading,
+    }),
+    [
+      tableRef,
+      rowHeight,
+      rowGap,
+      totalCount,
+      getTotalCount,
+      getItem,
+      onRangeChange,
+      upsert,
+      remove,
+      reset,
+      loading,
+    ],
+  )
 }
 
 /* ── Helpers ──────────────────────────────────────────────────── */
