@@ -1,6 +1,6 @@
 {
   "name": "@requence/table",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "description": "Headless virtualized table with compound component API, Suspense-compatible data caching, and column width persistence for React",
   "type": "module",
   "sideEffects": false,
