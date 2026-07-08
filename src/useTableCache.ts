@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { VirtualTableHandle } from './VirtualTable.tsx'
 
@@ -216,10 +216,16 @@ export function useTableCache<T>(
   const rowStride = rowHeight + rowGap
 
   // ── Stable wrappers for user-supplied option functions ────────
-  // useEffectEvent gives a stable identity that always delegates to
-  // the latest version — no need to list these in useCallback deps.
-  const stableGetItemId = useEffectEvent((item: T) => getItemId(item))
-  const stableCompare = useEffectEvent((a: T, b: T) => compare(a, b))
+  // Use refs instead of useEffectEvent because these functions may be
+  // called during the render phase (e.g. via urql's useState updater
+  // in subscription handlers). useEffectEvent throws when called
+  // during rendering.
+  const getItemIdRef = useRef(getItemId)
+  getItemIdRef.current = getItemId
+  const stableGetItemId = useCallback((item: T) => getItemIdRef.current(item), [])
+  const compareRef = useRef(compare)
+  compareRef.current = compare
+  const stableCompare = useCallback((a: T, b: T) => compareRef.current(a, b), [])
 
   const [, forceRender] = useState(0)
   const [iteration, setIteration] = useState(0)
