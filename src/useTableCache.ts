@@ -493,7 +493,12 @@ export function useTableCache<T>(
       for (const pageIndex of sortedPageIndices) {
         const page = c.pages.get(pageIndex)!
         if (page.length === 0) {
-          continue
+          // Empty page (e.g. 0→1 transition) — insert directly
+          page.push(item)
+          c.knownIds.set(id, pageIndex)
+          insertedAtIndex = pageIndex * pageSize
+          inserted = true
+          break
         }
 
         const firstItem = page[0]
