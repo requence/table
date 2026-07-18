@@ -333,25 +333,36 @@ export function useTableCache<T>(
     [pageSize],
   )
 
+  // ── fetchVisibleRange ─────────────────────────────────────────
+  // Fetch every page overlapping the last reported visible range.
+  // Also called after upsert()/remove() mutate the page structure:
+  // a surgical shift/pull that hits a gap can leave a visible page
+  // short (or evicted), and in a static viewport no scroll or resize
+  // will re-trigger onRangeChange to repair it. fetchPage's guards
+  // (inflight, full page, terminal page) make this a no-op when
+  // nothing needs refilling.
+  const fetchVisibleRange = useCallback(() => {
+    const c = cacheRef.current
+    const range = c.lastVisibleRange
+    if (!range || c.totalCount === 0) {
+      return
+    }
+
+    const startPage = Math.floor(range.start / pageSize)
+    const endPage = Math.floor(Math.min(range.end, c.totalCount - 1) / pageSize)
+
+    for (let p = startPage; p <= endPage; p++) {
+      fetchPage(p)
+    }
+  }, [pageSize, fetchPage])
+
   // ── onRangeChange ─────────────────────────────────────────────
   const onRangeChange = useCallback(
     (range: { start: number; end: number }) => {
-      const c = cacheRef.current
-      c.lastVisibleRange = range
-      if (c.totalCount === 0) {
-        return
-      }
-
-      const startPage = Math.floor(range.start / pageSize)
-      const endPage = Math.floor(
-        Math.min(range.end, c.totalCount - 1) / pageSize,
-      )
-
-      for (let p = startPage; p <= endPage; p++) {
-        fetchPage(p)
-      }
+      cacheRef.current.lastVisibleRange = range
+      fetchVisibleRange()
     },
-    [pageSize, fetchPage],
+    [fetchVisibleRange],
   )
 
   // ── debounced fetchCount ────────────────────────────────────────
@@ -553,6 +564,11 @@ export function useTableCache<T>(
         if (c.fetchCount) {
           debouncedFetchCount()
         }
+
+        // Self-heal: surgicalShift invalidates the pages past a gap;
+        // if any of them were visible, refill without waiting for a
+        // scroll-triggered onRangeChange.
+        fetchVisibleRange()
       } else {
         // ── Case 6: falls in a gap between cached pages
         // Determine if above or below visible range for scroll correction
@@ -579,7 +595,7 @@ export function useTableCache<T>(
 
       rerender()
     },
-    [rerender, debouncedFetchCount, pageSize, rowStride],
+    [rerender, debouncedFetchCount, pageSize, rowStride, fetchVisibleRange],
   )
 
   // ── remove ─────────────────────────────────────────────────────
@@ -622,9 +638,13 @@ export function useTableCache<T>(
         }
       }
 
+      // Self-heal: surgicalPull leaves the page short when the next
+      // page isn't cached (the client never holds the backfill row).
+      fetchVisibleRange()
+
       rerender()
     },
-    [rerender, pageSize, rowStride],
+    [rerender, pageSize, rowStride, fetchVisibleRange],
   )
 
   // ── reset ──────────────────────────────────────────────────────
